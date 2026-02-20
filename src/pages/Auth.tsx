@@ -112,9 +112,9 @@ const Auth = () => {
                 <span className="text-sm font-medium text-foreground">{content["auth.admin_access"]}</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                {content["auth.admin_email_label"]}: admin@aranha.ma
+                {content["auth.admin_email_label"]}: ******@***
                 <br />
-                {content["auth.admin_password_label"]}: Admin@2024
+                {content["auth.admin_password_label"]}: *******
               </p>
             </div>
           )}
