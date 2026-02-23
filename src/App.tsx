@@ -3,9 +3,10 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, HashRouter, Route, Routes } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { initializeStorage } from "@/lib/storage";
 import { applyBrandingToDocument, subscribeBrandingUpdates } from "@/lib/branding";
+import { initializeRemoteStorageSync } from "@/lib/remoteStorageSync";
 import Index from "./pages/Index";
 import About from "./pages/About";
 import Auth from "./pages/Auth";
@@ -25,11 +26,51 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const AppContent = () => {
+  const [isBootstrapped, setIsBootstrapped] = useState(false);
+
   useEffect(() => {
-    initializeStorage();
-    applyBrandingToDocument();
-    return subscribeBrandingUpdates(applyBrandingToDocument);
+    let isMounted = true;
+    let didBootstrap = false;
+    let stopRemoteSync: () => void = () => undefined;
+    const stopBrandingSubscription = subscribeBrandingUpdates(applyBrandingToDocument);
+
+    const finishBootstrap = () => {
+      if (didBootstrap) return;
+      didBootstrap = true;
+      initializeStorage();
+      applyBrandingToDocument();
+      if (isMounted) {
+        setIsBootstrapped(true);
+      }
+    };
+
+    const fallbackTimer = window.setTimeout(() => {
+      finishBootstrap();
+    }, 3000);
+
+    const bootstrapApp = async () => {
+      try {
+        stopRemoteSync = await initializeRemoteStorageSync();
+      } catch (error) {
+        console.warn("Remote storage sync initialization failed", error);
+      } finally {
+        finishBootstrap();
+      }
+    };
+
+    void bootstrapApp();
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
+      stopBrandingSubscription();
+      stopRemoteSync();
+    };
   }, []);
+
+  if (!isBootstrapped) {
+    return null;
+  }
 
   return (
     <Routes>
