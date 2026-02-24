@@ -21,6 +21,7 @@ const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, canAccessAdmin, hasPrivilege, user, logout } = useAuth();
+  const canManageMedia = hasPrivilege("manage_media");
   const content = useAppContent();
 
   const refreshBranding = useCallback(() => {
@@ -239,4 +240,3 @@ const Navbar = () => {
 };
 
 export default Navbar;
-  const canManageMedia = hasPrivilege("manage_media");

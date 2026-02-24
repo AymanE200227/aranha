@@ -282,20 +282,21 @@ const AdminUsers = () => {
                 Nouvel Utilisateur
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-card border-border sm:max-w-xl">
-              <DialogHeader>
+            <DialogContent className="flex max-h-[92vh] w-[calc(100%-1rem)] flex-col overflow-hidden border-border bg-card p-0 sm:max-w-xl">
+              <DialogHeader className="shrink-0 border-b border-border/60 px-6 pb-4 pt-6">
                 <DialogTitle className="font-display text-xl">
                   {editingUser ? "Modifier l'utilisateur" : "Nouvel Utilisateur"}
                 </DialogTitle>
                 <DialogDescription>
                   {editingUser
                     ? "Modifiez les informations de l'utilisateur."
-                    : "Remplissez les informations pour creer un nouvel utilisateur."}
+                  : "Remplissez les informations pour creer un nouvel utilisateur."}
                 </DialogDescription>
               </DialogHeader>
 
-              <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-                <div className="grid gap-4 sm:grid-cols-2">
+              <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
                   <div className="sm:col-span-2">
                     <Label>Nom complet</Label>
                     <Input
@@ -438,10 +439,13 @@ const AdminUsers = () => {
                     </div>
                   </div>
                 </div>
+                </div>
 
-                <Button type="submit" variant="gold" className="w-full">
-                  {editingUser ? "Modifier" : "Creer"}
-                </Button>
+                <div className="shrink-0 border-t border-border/60 bg-card/95 px-6 py-4 backdrop-blur">
+                  <Button type="submit" variant="gold" className="w-full">
+                    {editingUser ? "Modifier" : "Creer"}
+                  </Button>
+                </div>
               </form>
             </DialogContent>
           </Dialog>

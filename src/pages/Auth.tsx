@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import BrandLogo from "@/components/branding/BrandLogo";
 import { useAppContent } from "@/hooks/useAppContent";
 import { getResolvedBrandName, getResolvedLogoUrl, subscribeBrandingUpdates } from "@/lib/branding";
+import AppLoader from "@/components/layout/AppLoader";
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -73,7 +74,9 @@ const Auth = () => {
     }
   };
 
-  if (isLoading) return null;
+  if (isLoading) {
+    return <AppLoader message="Chargement de l'authentification..." />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-hero flex items-center justify-center px-4">

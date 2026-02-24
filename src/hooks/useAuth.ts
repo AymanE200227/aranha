@@ -9,6 +9,8 @@ import {
 } from "@/lib/storage";
 import { userCanAccessAdminPanel, userHasAdminPrivilege } from "@/lib/adminPermissions";
 
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 3500;
+
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -19,7 +21,20 @@ export function useAuth() {
     let active = true;
 
     const init = async () => {
-      await bootstrapStorage();
+      // Fast path: resolve from local session immediately.
+      checkSession();
+
+      try {
+        await Promise.race([
+          bootstrapStorage(),
+          new Promise<void>((resolve) => {
+            window.setTimeout(resolve, AUTH_BOOTSTRAP_TIMEOUT_MS);
+          }),
+        ]);
+      } catch (error) {
+        console.warn("Auth bootstrap failed", error);
+      }
+
       if (!active) return;
       checkSession();
       setIsLoading(false);

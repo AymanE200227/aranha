@@ -1,0 +1,1 @@
+import{r as e}from"./index-Cpc6ZVzZ.js";import{g as s,a as r}from"./content-BsGE2vc3.js";const c=()=>{const[n,o]=e.useState(()=>s()),t=e.useCallback(()=>{o(s())},[]);return e.useEffect(()=>(t(),r(t)),[t]),n};export{c as u};
