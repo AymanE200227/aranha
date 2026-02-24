@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
-import { Calendar, Clock3, Layers3 } from "lucide-react";
+import { Calendar, Clock3, Layers3, Sparkles } from "lucide-react";
 import { getSchedules, getGroups } from "@/lib/storage";
 import { Group, ScheduleSlot } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
@@ -24,11 +24,25 @@ const Schedule = () => {
   const content = useAppContent();
   const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const timeLabels = useMemo(() => [...SCHEDULE_TIME_SLOTS, SCHEDULE_DAY_END_LABEL], []);
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
     setSchedules(getSchedules());
     setGroups(getGroups());
   }, []);
+
+  useEffect(() => {
+    loadData();
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (!event.key || event.key === "jj_schedules" || event.key === "jj_groups") {
+        loadData();
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [loadData]);
 
   const groupsById = useMemo(() => {
     return new Map(groups.map((group) => [group.id, group]));
@@ -81,7 +95,7 @@ const Schedule = () => {
           <td key={`${day}-${startingSlot.id}`} colSpan={span} className="p-1 align-top">
             <div
               className={cn(
-                "h-[56px] sm:h-[64px] rounded-md border px-2 py-1",
+                "h-[56px] sm:h-[64px] rounded-md border px-2 py-1 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md",
                 "flex flex-col justify-between text-left",
                 colorClasses.filledCell,
                 isUserGroup && "ring-2 ring-primary ring-offset-2 ring-offset-background"
@@ -118,31 +132,40 @@ const Schedule = () => {
     <div className="min-h-screen bg-background">
       <Navbar />
 
-      <main className="pt-24 pb-16">
+      <main className="relative overflow-hidden pt-24 pb-16">
+        <div className="pointer-events-none absolute -top-20 right-0 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+        <div className="pointer-events-none absolute top-40 -left-20 h-72 w-72 rounded-full bg-accent/10 blur-3xl" />
         <div className="container mx-auto px-3 sm:px-4">
           {/* Header */}
-          <div className="text-center mb-10">
+          <div className="relative mb-10 overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-secondary/35 via-card to-secondary/20 px-4 py-8 sm:px-6 sm:py-10 text-center animate-fade-in">
+            <div className="pointer-events-none absolute -top-10 -right-10 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
+            <div className="pointer-events-none absolute -bottom-12 -left-12 h-36 w-36 rounded-full bg-accent/10 blur-2xl" />
+
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/30 mb-4">
-              <Calendar className="w-4 h-4 text-primary" />
+              <Sparkles className="w-4 h-4 text-primary" />
               <span className="text-primary text-sm font-medium">{content["schedule.badge"]}</span>
             </div>
             <h1 className="font-display text-4xl md:text-5xl text-foreground">
               {content["schedule.title_prefix"]} <span className="text-gradient-gold">{content["schedule.title_highlight"]}</span>
             </h1>
             <p className="text-muted-foreground mt-4 max-w-2xl mx-auto">{content["schedule.description"]}</p>
+            <p className="text-xs text-muted-foreground/90 mt-3 inline-flex items-center gap-2">
+              <Clock3 className="w-3.5 h-3.5" />
+              Grille detaillee en 30 minutes, de 06:00 a 22:00.
+            </p>
           </div>
 
           {/* Quick Stats */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-            <div className="rounded-xl border border-border/60 bg-secondary/20 px-4 py-3 text-center">
+            <div className="rounded-xl border border-border/60 bg-secondary/20 px-4 py-3 text-center transition-transform duration-300 hover:-translate-y-0.5">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Jours actifs</p>
               <p className="font-display text-2xl text-foreground">{SCHEDULE_DAYS.length}</p>
             </div>
-            <div className="rounded-xl border border-border/60 bg-secondary/20 px-4 py-3 text-center">
+            <div className="rounded-xl border border-border/60 bg-secondary/20 px-4 py-3 text-center transition-transform duration-300 hover:-translate-y-0.5">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Sessions</p>
               <p className="font-display text-2xl text-foreground">{schedules.length}</p>
             </div>
-            <div className="rounded-xl border border-border/60 bg-secondary/20 px-4 py-3 text-center">
+            <div className="rounded-xl border border-border/60 bg-secondary/20 px-4 py-3 text-center transition-transform duration-300 hover:-translate-y-0.5">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Heures planifiees</p>
               <p className="font-display text-2xl text-foreground">{totalHours.toFixed(1).replace(".0", "")}h</p>
             </div>
@@ -150,11 +173,11 @@ const Schedule = () => {
 
           {/* User Group Info */}
           {isAuthenticated && userGroups.length > 0 && (
-            <div className="mb-6 p-4 rounded-lg bg-primary/10 border border-primary/30 text-center max-w-md mx-auto">
+            <div className="mb-6 p-4 rounded-xl bg-primary/10 border border-primary/30 text-center max-w-2xl mx-auto">
               <p className="text-sm text-muted-foreground">{content["schedule.user_group_label"]}</p>
               <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
                 {userGroups.map((group) => (
-                  <p key={group.id} className="font-display text-base text-primary">
+                  <p key={group.id} className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 font-display text-base text-primary">
                     {group.name}
                   </p>
                 ))}
@@ -176,15 +199,21 @@ const Schedule = () => {
           </div>
 
           {/* Schedule Grid */}
-          <div className="card-elevated p-3 sm:p-4 overflow-x-auto">
-            <table className="w-full min-w-[2360px] border-separate border-spacing-0">
+          <div className="card-elevated p-3 sm:p-4 overflow-x-auto border-border/70 bg-gradient-to-b from-card to-secondary/10">
+            <table className="w-full min-w-[1660px] border-separate border-spacing-0">
               <thead>
                 <tr>
-                  <th className="sticky left-0 z-20 bg-card p-2 sm:p-3 text-left font-display text-foreground min-w-[120px]">
+                  <th className="sticky top-0 left-0 z-20 bg-card/95 backdrop-blur p-2 sm:p-3 text-left font-display text-foreground min-w-[120px]">
                     {content["schedule.table.day"]}
                   </th>
-                {SCHEDULE_TIME_SLOTS.map((time) => (
-                  <th key={time} className="p-1.5 sm:p-2 text-center font-mono text-[11px] sm:text-xs text-muted-foreground min-w-[68px] sm:min-w-[76px]">
+                {timeLabels.map((time, timeIndex) => (
+                  <th
+                    key={time}
+                    className={cn(
+                      "sticky top-0 z-10 bg-card/90 backdrop-blur p-1.5 sm:p-2 text-center font-mono text-[11px] sm:text-xs text-muted-foreground min-w-[46px] sm:min-w-[50px]",
+                      timeIndex === timeLabels.length - 1 && "text-primary border-l border-primary/30"
+                    )}
+                  >
                     {time}
                   </th>
                 ))}
@@ -192,11 +221,14 @@ const Schedule = () => {
             </thead>
               <tbody>
                 {SCHEDULE_DAYS.map((day) => (
-                  <tr key={day} className="border-t border-border/30">
-                    <td className="sticky left-0 z-10 bg-card p-2 sm:p-3 font-display text-foreground text-xs sm:text-sm border-r border-border/30">
+                  <tr key={day} className="border-t border-border/30 even:bg-secondary/10">
+                    <td className="sticky left-0 z-10 bg-card/95 backdrop-blur p-2 sm:p-3 font-display text-foreground text-xs sm:text-sm border-r border-border/30">
                       {day}
                     </td>
                     {renderDayCells(day)}
+                    <td className="p-0 align-top">
+                      <div className="h-[56px] sm:h-[64px] border-l border-primary/35 bg-primary/5" />
+                    </td>
                   </tr>
                 ))}
               </tbody>

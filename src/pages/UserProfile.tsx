@@ -1,6 +1,6 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Award, Calendar, Edit, FileText, IdCard, Save, Shield, User as UserIcon } from "lucide-react";
+import { Award, Calendar, Clock3, Edit, FileText, IdCard, Save, Shield, User as UserIcon } from "lucide-react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,12 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppContent } from "@/hooks/useAppContent";
-import { getUserById, updateUser } from "@/lib/storage";
+import { cn } from "@/lib/utils";
+import { getGroupColorClasses } from "@/lib/groupColors";
+import { getUserGroupIds } from "@/lib/userGroups";
+import { getGroups, getSchedules, getUserById, updateUser } from "@/lib/storage";
+import { Group, ScheduleSlot } from "@/lib/types";
+import { SCHEDULE_DAYS, SCHEDULE_DAY_END_LABEL, parseTimeToMinutes } from "@/lib/schedule";
 import {
   BELT_CATEGORY_LABELS,
   BELT_OPTIONS,
@@ -177,6 +182,20 @@ const InfoRow = ({
   </div>
 );
 
+const PROFILE_PLANNING_ANCHORS = ["12:00", "13:00", "14:00", "16:00", "18:00", "19:00", "21:00", SCHEDULE_DAY_END_LABEL];
+
+const formatPlanningHour = (time: string): string => {
+  const [hourText = "0", minuteText = "00"] = time.split(":");
+  const hour = Number(hourText);
+  if (Number.isNaN(hour)) return time;
+  if (minuteText === "00") return `${hour}H`;
+  return `${hour}H${minuteText}`;
+};
+
+const formatPlanningRange = (start: string, end: string): string => {
+  return `${formatPlanningHour(start)}-${formatPlanningHour(end)}`;
+};
+
 export default function UserProfile() {
   const navigate = useNavigate();
   const { user: currentUser, isAuthenticated, isLoading } = useAuth();
@@ -199,12 +218,32 @@ export default function UserProfile() {
     beltPromotionDate: "",
     editingEnabled: true,
   });
+  const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
 
   const canEdit = !!currentUser;
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) navigate("/auth");
   }, [isAuthenticated, isLoading, navigate]);
+
+  useEffect(() => {
+    const loadPlanningData = () => {
+      setSchedules(getSchedules());
+      setGroups(getGroups());
+    };
+
+    loadPlanningData();
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (!event.key || event.key === "jj_schedules" || event.key === "jj_groups") {
+        loadPlanningData();
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -315,6 +354,82 @@ export default function UserProfile() {
     () => getTrainingDuration(profileData.registrationDate),
     [profileData.registrationDate]
   );
+  const userGroupIds = useMemo(() => getUserGroupIds(currentUser), [currentUser]);
+  const groupsById = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
+  const userTrainingGroups = useMemo(
+    () => groups.filter((group) => userGroupIds.includes(group.id)),
+    [groups, userGroupIds]
+  );
+
+  const planningBoundaries = useMemo(() => {
+    const minMinutes = 6 * 60;
+    const maxMinutes = parseTimeToMinutes(SCHEDULE_DAY_END_LABEL);
+    const values = new Set<number>();
+
+    PROFILE_PLANNING_ANCHORS.forEach((time) => {
+      const minutes = parseTimeToMinutes(time);
+      if (minutes >= minMinutes && minutes <= maxMinutes) values.add(minutes);
+    });
+
+    schedules.forEach((slot) => {
+      const start = parseTimeToMinutes(slot.startTime);
+      const end = parseTimeToMinutes(slot.endTime);
+      if (start >= minMinutes && start <= maxMinutes) values.add(start);
+      if (end >= minMinutes && end <= maxMinutes) values.add(end);
+    });
+
+    const sorted = Array.from(values).sort((left, right) => left - right);
+    if (sorted.length < 2) {
+      return ["21:00", SCHEDULE_DAY_END_LABEL];
+    }
+
+    return sorted.map((minutes) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`);
+  }, [schedules]);
+
+  const planningRows = useMemo(() => {
+    return planningBoundaries.slice(0, -1).map((start, index) => ({
+      start,
+      end: planningBoundaries[index + 1],
+    }));
+  }, [planningBoundaries]);
+
+  const planningBoundaryIndex = useMemo(() => {
+    return new Map(planningBoundaries.map((time, index) => [time, index]));
+  }, [planningBoundaries]);
+
+  const planningSlotStartMap = useMemo(() => {
+    const map = new Map<string, ScheduleSlot>();
+    schedules.forEach((slot) => {
+      map.set(`${slot.day}|${slot.startTime}`, slot);
+    });
+    return map;
+  }, [schedules]);
+
+  const latestScheduleEndTime = useMemo(() => {
+    if (schedules.length === 0) return "--:--";
+    return schedules.reduce((latest, slot) => {
+      return parseTimeToMinutes(slot.endTime) > parseTimeToMinutes(latest) ? slot.endTime : latest;
+    }, "00:00");
+  }, [schedules]);
+
+  const getPlanningSlotSpan = (slot: ScheduleSlot): number => {
+    const startIndex = planningBoundaryIndex.get(slot.startTime);
+    const endIndex = planningBoundaryIndex.get(slot.endTime);
+    if (typeof startIndex === "number" && typeof endIndex === "number" && endIndex > startIndex) {
+      return endIndex - startIndex;
+    }
+    return 1;
+  };
+
+  const isPlanningTimeCovered = (day: string, rowStart: string): boolean => {
+    const currentMinutes = parseTimeToMinutes(rowStart);
+    return schedules.some((slot) => {
+      if (slot.day !== day) return false;
+      const startMinutes = parseTimeToMinutes(slot.startTime);
+      const endMinutes = parseTimeToMinutes(slot.endTime);
+      return startMinutes <= currentMinutes && currentMinutes < endMinutes;
+    });
+  };
 
   const hasRegistrationDate = hasValidDate(profileData.registrationDate);
   const hasPromotionDate = hasValidDate(profileData.beltPromotionDate);
@@ -477,6 +592,105 @@ export default function UserProfile() {
                   value={formatBeltRank(profileData.beltCategory, selectedBelt.value, beltDegree)}
                 />
               </section>
+
+              <Card className="border-border/60 bg-secondary/30 backdrop-blur-sm">
+                <CardHeader className="space-y-2">
+                  <CardTitle className="text-lg text-foreground">Planning Academie</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Vue emploi du temps inspiree du tableau club. La fin de journee est incluse jusqu a {SCHEDULE_DAY_END_LABEL}.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {userTrainingGroups.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Mes groupes</p>
+                      {userTrainingGroups.map((group) => {
+                        const colorClasses = getGroupColorClasses(group.color);
+                        return (
+                          <span
+                            key={group.id}
+                            className={cn("inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs", colorClasses.badge)}
+                          >
+                            <span className={cn("h-2 w-2 rounded-full", colorClasses.dot)} />
+                            {group.name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/60">
+                    <table className="w-full min-w-[780px] border-separate border-spacing-0">
+                      <thead>
+                        <tr>
+                          <th className="sticky left-0 top-0 z-20 min-w-[120px] bg-card/90 p-2 text-left font-display text-xs uppercase tracking-wide text-foreground">
+                            Horaire
+                          </th>
+                          {SCHEDULE_DAYS.map((day) => (
+                            <th
+                              key={day}
+                              className="sticky top-0 z-10 min-w-[100px] bg-card/90 p-2 text-center font-display text-xs uppercase tracking-wide text-foreground"
+                            >
+                              {day}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {planningRows.map((row, rowIndex) => (
+                          <tr key={`${row.start}-${row.end}`} className={rowIndex % 2 === 0 ? "bg-secondary/10" : ""}>
+                            <th className="sticky left-0 z-10 border-t border-border/30 bg-card/95 p-2 text-left text-xs font-semibold text-foreground">
+                              {formatPlanningRange(row.start, row.end)}
+                            </th>
+                            {SCHEDULE_DAYS.map((day) => {
+                              const startingSlot = planningSlotStartMap.get(`${day}|${row.start}`);
+                              if (startingSlot) {
+                                const group = groupsById.get(startingSlot.groupId);
+                                const colorClasses = getGroupColorClasses(group?.color);
+                                const span = Math.max(1, Math.min(getPlanningSlotSpan(startingSlot), planningRows.length));
+                                const isUserGroup = !!group && userGroupIds.includes(group.id);
+
+                                return (
+                                  <td key={`${day}-${startingSlot.id}`} rowSpan={span} className="border-t border-border/30 p-1 align-top">
+                                    <div
+                                      className={cn(
+                                        "h-full min-h-[48px] rounded-md border px-2 py-1.5 text-left",
+                                        "flex flex-col justify-between gap-1",
+                                        colorClasses.filledCell,
+                                        isUserGroup && "ring-2 ring-primary/60 ring-offset-1 ring-offset-card"
+                                      )}
+                                    >
+                                      <p className="text-xs font-semibold text-foreground">{group?.name || "Groupe"}</p>
+                                      <p className="text-[11px] text-muted-foreground">
+                                        {formatPlanningRange(startingSlot.startTime, startingSlot.endTime)}
+                                      </p>
+                                    </div>
+                                  </td>
+                                );
+                              }
+
+                              if (isPlanningTimeCovered(day, row.start)) {
+                                return null;
+                              }
+
+                              return (
+                                <td key={`${day}-${row.start}`} className="border-t border-border/30 p-1 align-top">
+                                  <div className="h-[48px] rounded-md border border-dashed border-border/35 bg-secondary/15" />
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <p className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                    <Clock3 className="h-3.5 w-3.5" />
+                    Fin de journee academie: {SCHEDULE_DAY_END_LABEL} incluse. Fin la plus tardive planifiee: {latestScheduleEndTime}.
+                  </p>
+                </CardContent>
+              </Card>
 
               <Card className="border-border/60 bg-secondary/30 backdrop-blur-sm">
                 <CardHeader>

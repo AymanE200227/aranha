@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,7 @@ import {
   Trash2,
   MoveHorizontal,
   Clock3,
+  Layers3,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Group, ScheduleSlot } from "@/lib/types";
@@ -30,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { getGroupColorClasses } from "@/lib/groupColors";
 import {
   SCHEDULE_DAYS,
+  SCHEDULE_DAY_END_LABEL,
   SCHEDULE_SLOT_INTERVAL_MINUTES,
   SCHEDULE_TIME_SLOTS,
   buildSlotFromIndexes,
@@ -59,17 +61,13 @@ const AdminSchedules = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [pendingRange, setPendingRange] = useState<PendingRange | null>(null);
   const [durationSlots, setDurationSlots] = useState(1);
+  const timeLabels = useMemo(() => [...SCHEDULE_TIME_SLOTS, SCHEDULE_DAY_END_LABEL], []);
 
   useEffect(() => {
     if (!isLoading && (!isAuthenticated || !isAdmin)) {
       navigate("/auth");
     }
   }, [isLoading, isAuthenticated, isAdmin, navigate]);
-
-  useEffect(() => {
-    setSchedules(getSchedules());
-    setGroups(getGroups());
-  }, []);
 
   const groupsById = useMemo(() => {
     return new Map(groups.map((group) => [group.id, group]));
@@ -94,10 +92,23 @@ const AdminSchedules = () => {
     return schedules.reduce((sum, slot) => sum + getDurationHoursFromTimes(slot.startTime, slot.endTime), 0);
   }, [schedules]);
 
-  const loadData = () => {
+  const loadData = useCallback(() => {
     setSchedules(getSchedules());
     setGroups(getGroups());
-  };
+  }, []);
+
+  useEffect(() => {
+    loadData();
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (!event.key || event.key === "jj_schedules" || event.key === "jj_groups") {
+        loadData();
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [loadData]);
 
   const getSlotAtCell = (day: string, columnIndex: number): ScheduleSlot | null => {
     const time = SCHEDULE_TIME_SLOTS[columnIndex];
@@ -214,8 +225,8 @@ const AdminSchedules = () => {
               type="button"
               onClick={() => handleDeleteSlot(startingSlot)}
               className={cn(
-                "h-[56px] sm:h-[64px] w-full rounded-md border px-2 py-1 text-left transition-all",
-                "hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+                "h-[56px] sm:h-[64px] w-full rounded-md border px-2 py-1 text-left transition-all duration-300",
+                "hover:scale-[1.01] hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
                 colorClasses.filledCell,
                 colorClasses.filledCellHover
               )}
@@ -248,13 +259,13 @@ const AdminSchedules = () => {
             type="button"
             onClick={() => openCreateDialog(day, cellIndex)}
             className={cn(
-              "schedule-cell h-[56px] sm:h-[64px] w-full rounded-md border border-dashed",
-              "flex items-center justify-center transition-all",
-              "border-border/40 bg-secondary/20 hover:bg-secondary/40"
+              "group schedule-cell h-[56px] sm:h-[64px] w-full rounded-md border border-dashed",
+              "flex items-center justify-center transition-all duration-300",
+              "border-border/40 bg-secondary/20 hover:bg-secondary/40 hover:border-primary/40"
             )}
             title="Cliquez pour creer une session"
           >
-            <Plus className="h-4 w-4 text-muted-foreground/40" />
+            <Plus className="h-4 w-4 text-muted-foreground/40 transition-all duration-300 group-hover:scale-110 group-hover:text-primary" />
           </button>
         </td>
       );
@@ -279,30 +290,35 @@ const AdminSchedules = () => {
 
   return (
     <AdminShell onLogout={handleLogout}>
-      <div className="mx-auto max-w-[1400px]">
-        <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
-          <div>
-            <h1 className="font-display text-3xl text-foreground">
-              EMPLOIS DU <span className="text-gradient-gold">TEMPS</span>
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Cliquez une case vide puis choisissez une duree (pas de {SCHEDULE_SLOT_INTERVAL_MINUTES} min). Cliquez un
-              bloc existant pour le supprimer.
-            </p>
-          </div>
+      <div className="w-full">
+        <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-secondary/40 via-card to-secondary/20 p-5 sm:p-6 mb-8 animate-fade-in">
+          <div className="pointer-events-none absolute -top-16 -right-8 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-24 -left-12 h-48 w-48 rounded-full bg-accent/10 blur-3xl" />
 
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-2">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Creneaux</p>
-              <p className="font-display text-xl text-foreground">{schedules.length}</p>
+          <div className="relative flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h1 className="font-display text-3xl text-foreground">
+                EMPLOIS DU <span className="text-gradient-gold">TEMPS</span>
+              </h1>
+              <p className="text-muted-foreground mt-1">
+                Grille professionnelle: 06:00 a 22:00, pas de {SCHEDULE_SLOT_INTERVAL_MINUTES} minutes, fusion auto des
+                creneaux.
+              </p>
             </div>
-            <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-2">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Heures totales</p>
-              <p className="font-display text-xl text-foreground">{totalHoursPlanned.toFixed(1).replace(".0", "")}h</p>
-            </div>
-            <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-2">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Jusqu a</p>
-              <p className="font-display text-xl text-foreground">{latestEndTime}</p>
+
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl border border-border/50 bg-background/35 px-3 py-2 transition-transform hover:-translate-y-0.5">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Creneaux</p>
+                <p className="font-display text-xl text-foreground">{schedules.length}</p>
+              </div>
+              <div className="rounded-xl border border-border/50 bg-background/35 px-3 py-2 transition-transform hover:-translate-y-0.5">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Heures</p>
+                <p className="font-display text-xl text-foreground">{totalHoursPlanned.toFixed(1).replace(".0", "")}h</p>
+              </div>
+              <div className="rounded-xl border border-border/50 bg-background/35 px-3 py-2 transition-transform hover:-translate-y-0.5">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Fin max</p>
+                <p className="font-display text-xl text-foreground">{latestEndTime}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -312,7 +328,10 @@ const AdminSchedules = () => {
           {groups.map((group) => {
             const colorClasses = getGroupColorClasses(group.color);
             return (
-              <div key={group.id} className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm">
+              <div
+                key={group.id}
+                className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-secondary/35 px-3 py-1 text-sm transition-colors hover:bg-secondary/55"
+              >
                 <span className={cn("h-2.5 w-2.5 rounded-full", colorClasses.dot)} />
                 <span className="text-muted-foreground">{group.name}</span>
               </div>
@@ -320,15 +339,21 @@ const AdminSchedules = () => {
           })}
         </div>
 
-        <div className="card-elevated p-3 sm:p-4 overflow-x-auto">
-          <table className="w-full min-w-[2360px] border-separate border-spacing-0">
+        <div className="card-elevated p-3 sm:p-4 overflow-x-auto border-border/70 bg-gradient-to-b from-card to-secondary/10">
+          <table className="w-full min-w-[1660px] border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="sticky left-0 z-20 bg-card p-2 sm:p-3 text-left font-display text-foreground min-w-[120px]">
+                <th className="sticky top-0 left-0 z-20 bg-card/95 backdrop-blur p-2 sm:p-3 text-left font-display text-foreground min-w-[120px]">
                   Jour
                 </th>
-                {SCHEDULE_TIME_SLOTS.map((time) => (
-                  <th key={time} className="p-1.5 sm:p-2 text-center font-mono text-[11px] sm:text-xs text-muted-foreground min-w-[68px] sm:min-w-[76px]">
+                {timeLabels.map((time, timeIndex) => (
+                  <th
+                    key={time}
+                    className={cn(
+                      "sticky top-0 z-10 bg-card/90 backdrop-blur p-1.5 sm:p-2 text-center font-mono text-[11px] sm:text-xs text-muted-foreground min-w-[46px] sm:min-w-[50px]",
+                      timeIndex === timeLabels.length - 1 && "text-primary border-l border-primary/30"
+                    )}
+                  >
                     {time}
                   </th>
                 ))}
@@ -336,20 +361,28 @@ const AdminSchedules = () => {
             </thead>
             <tbody>
               {SCHEDULE_DAYS.map((day) => (
-                <tr key={day} className="border-t border-border/30">
-                  <td className="sticky left-0 z-10 bg-card p-2 sm:p-3 font-display text-foreground text-xs sm:text-sm border-r border-border/30">
+                <tr key={day} className="border-t border-border/30 even:bg-secondary/10">
+                  <td className="sticky left-0 z-10 bg-card/95 backdrop-blur p-2 sm:p-3 font-display text-foreground text-xs sm:text-sm border-r border-border/30">
                     {day}
                   </td>
                   {renderDayCells(day)}
+                  <td className="p-0 align-top">
+                    <div className="h-[56px] sm:h-[64px] border-l border-primary/35 bg-primary/5" />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
+        <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-border/60 bg-secondary/30 px-3 py-1.5 text-xs text-muted-foreground">
+          <Layers3 className="h-3.5 w-3.5" />
+          Astuce: cliquez une case vide pour creer; cliquez un bloc rempli pour supprimer.
+        </div>
+
         {/* Create Slot Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="bg-card border-border">
+          <DialogContent className="bg-card border-border sm:max-w-lg">
             <DialogHeader>
               <DialogTitle className="font-display text-xl">Creer un creneau fusionne</DialogTitle>
               <DialogDescription>

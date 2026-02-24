@@ -1,6 +1,6 @@
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { LogOut, Menu } from "lucide-react";
+import { ArrowLeft, LogOut, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -25,12 +25,12 @@ export default function AdminShell({ children, onLogout, mainClassName }: AdminS
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background md:flex">
-      <aside className="fixed hidden h-full w-64 border-r border-sidebar-border bg-sidebar md:block">
-        <div className="p-6">
-          <AdminSidebarBrand label="ADMIN" />
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-0 z-40 border-b border-border/70 bg-background/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-[1800px] items-center gap-3 px-3 py-3 sm:px-4 lg:px-6">
+          <AdminSidebarBrand to="/admin" label="ADMIN" className="mb-0 shrink-0" labelClassName="text-foreground" />
 
-          <nav className="space-y-2">
+          <nav className="hidden flex-1 items-center gap-1 overflow-x-auto lg:flex">
             {ADMIN_NAV_LINKS.map((link) => {
               const isActive = location.pathname === link.path;
               return (
@@ -38,44 +38,43 @@ export default function AdminShell({ children, onLogout, mainClassName }: AdminS
                   key={link.path}
                   to={link.path}
                   className={cn(
-                    "flex items-center gap-3 rounded-lg px-4 py-3 transition-colors",
+                    "inline-flex items-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm transition-all",
                     isActive
-                      ? "bg-sidebar-accent text-sidebar-primary"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent/50"
+                      ? "border-primary/45 bg-primary/15 text-primary"
+                      : "border-transparent text-muted-foreground hover:border-border hover:bg-secondary/50 hover:text-foreground"
                   )}
                 >
-                  <link.icon className="h-5 w-5" />
-                  <span className="font-medium">{link.name}</span>
+                  <link.icon className="h-4 w-4" />
+                  <span>{link.name}</span>
                 </Link>
               );
             })}
           </nav>
-        </div>
 
-        <div className="absolute bottom-6 left-6 right-6">
-          <Button variant="outline" className="w-full justify-start gap-3" onClick={onLogout}>
-            <LogOut className="h-4 w-4" />
-            Deconnexion
-          </Button>
-        </div>
-      </aside>
+          <div className="ml-auto hidden items-center gap-2 sm:flex">
+            <Button asChild variant="outline" className="gap-2">
+              <Link to="/">
+                <ArrowLeft className="h-4 w-4" />
+                Retour Accueil
+              </Link>
+            </Button>
+            <Button variant="outline" className="gap-2" onClick={onLogout}>
+              <LogOut className="h-4 w-4" />
+              Deconnexion
+            </Button>
+          </div>
 
-      <div className="md:ml-64 md:flex-1">
-        <header className="sticky top-0 z-30 border-b border-border/60 bg-background/95 backdrop-blur md:hidden">
-          <div className="flex items-center justify-between px-4 py-3">
-            <AdminSidebarBrand to="/admin" label="ADMIN" className="mb-0" />
+          <div className="ml-auto lg:hidden">
             <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
               <SheetTrigger asChild>
                 <Button variant="outline" size="icon">
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-72 border-sidebar-border bg-sidebar px-0">
+              <SheetContent side="left" className="w-80 px-0">
                 <SheetHeader className="px-6 pb-2 text-left">
-                  <SheetTitle className="text-sidebar-foreground">Navigation Admin</SheetTitle>
-                  <SheetDescription className="text-sidebar-foreground/70">
-                    Gestion rapide depuis mobile.
-                  </SheetDescription>
+                  <SheetTitle>Navigation Admin</SheetTitle>
+                  <SheetDescription>Acces rapide aux sections d'administration.</SheetDescription>
                 </SheetHeader>
                 <div className="px-4 pb-6">
                   <nav className="space-y-2">
@@ -89,8 +88,8 @@ export default function AdminShell({ children, onLogout, mainClassName }: AdminS
                           className={cn(
                             "flex items-center gap-3 rounded-lg px-4 py-3 transition-colors",
                             isActive
-                              ? "bg-sidebar-accent text-sidebar-primary"
-                              : "text-sidebar-foreground hover:bg-sidebar-accent/50"
+                              ? "bg-primary/15 text-primary"
+                              : "text-foreground hover:bg-secondary/60"
                           )}
                         >
                           <link.icon className="h-5 w-5" />
@@ -99,25 +98,35 @@ export default function AdminShell({ children, onLogout, mainClassName }: AdminS
                       );
                     })}
                   </nav>
-                  <Button
-                    variant="outline"
-                    className="mt-6 w-full justify-start gap-3"
-                    onClick={() => {
-                      setMobileNavOpen(false);
-                      onLogout();
-                    }}
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Deconnexion
-                  </Button>
+
+                  <div className="mt-6 space-y-2">
+                    <Button asChild variant="outline" className="w-full justify-start gap-3">
+                      <Link to="/" onClick={() => setMobileNavOpen(false)}>
+                        <ArrowLeft className="h-4 w-4" />
+                        Retour Accueil
+                      </Link>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start gap-3"
+                      onClick={() => {
+                        setMobileNavOpen(false);
+                        onLogout();
+                      }}
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Deconnexion
+                    </Button>
+                  </div>
                 </div>
               </SheetContent>
             </Sheet>
           </div>
-        </header>
+        </div>
+      </header>
 
-        <main className={cn("p-4 sm:p-6 md:p-8", mainClassName)}>{children}</main>
-      </div>
+      <main className={cn("mx-auto w-full max-w-[1800px] p-3 sm:p-4 lg:p-6", mainClassName)}>{children}</main>
     </div>
   );
 }
