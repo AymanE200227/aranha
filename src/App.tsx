@@ -82,24 +82,25 @@ const AppContent = () => {
   }, [location.pathname]);
 
   useEffect(() => {
-    const preloadRoutes = () => {
-      const preloaders = [
-        loadIndexPage,
-        loadSchedulePage,
-        loadGalleryPage,
-        loadStatsPage,
-        loadUserProfilePage,
-        loadAdminDashboardPage,
-      ];
+    const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+    const shouldSkipPreload = Boolean(connection?.saveData) || (navigator.hardwareConcurrency || 4) <= 4;
+    if (shouldSkipPreload) return;
 
-      preloaders.forEach((preloadPage, index) => {
-        window.setTimeout(() => {
-          void preloadPage();
-        }, index * 140);
-      });
+    const preloadRoutes = () => {
+      void loadSchedulePage();
+      void loadGalleryPage();
+      void loadUserProfilePage();
     };
 
-    const preloadTimeout = window.setTimeout(preloadRoutes, 550);
+    if ("requestIdleCallback" in window) {
+      const idleHandle = window.requestIdleCallback(preloadRoutes, { timeout: 2000 });
+
+      return () => {
+        window.cancelIdleCallback(idleHandle);
+      };
+    }
+
+    const preloadTimeout = window.setTimeout(preloadRoutes, 1200);
     return () => window.clearTimeout(preloadTimeout);
   }, []);
 

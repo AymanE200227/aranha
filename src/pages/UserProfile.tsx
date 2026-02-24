@@ -1,6 +1,6 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Award, Calendar, Clock3, Edit, FileText, IdCard, Save, Shield, User as UserIcon } from "lucide-react";
+import { Award, Calendar, Clock3, Edit, FileText, IdCard, RotateCw, Save, Shield, User as UserIcon } from "lucide-react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { Button } from "@/components/ui/button";
@@ -201,6 +201,7 @@ export default function UserProfile() {
   const { user: currentUser, isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
+  const [isPlanningMobileRotated, setIsPlanningMobileRotated] = useState(false);
   const content = useAppContent();
   const [profileData, setProfileData] = useState({
     name: "",
@@ -360,6 +361,27 @@ export default function UserProfile() {
     () => groups.filter((group) => userGroupIds.includes(group.id)),
     [groups, userGroupIds]
   );
+  const planningSlotsByDay = useMemo(() => {
+    const map = new Map<string, ScheduleSlot[]>();
+    SCHEDULE_DAYS.forEach((day) => {
+      map.set(day, []);
+    });
+
+    schedules.forEach((slot) => {
+      map.get(slot.day)?.push(slot);
+    });
+
+    map.forEach((daySlots, day) => {
+      map.set(
+        day,
+        [...daySlots].sort(
+          (left, right) => parseTimeToMinutes(left.startTime) - parseTimeToMinutes(right.startTime)
+        )
+      );
+    });
+
+    return map;
+  }, [schedules]);
 
   const planningBoundaries = useMemo(() => {
     const minMinutes = 6 * 60;
@@ -405,6 +427,25 @@ export default function UserProfile() {
     return map;
   }, [schedules]);
 
+  const planningActiveSlotMap = useMemo(() => {
+    const map = new Map<string, ScheduleSlot>();
+    SCHEDULE_DAYS.forEach((day) => {
+      const daySlots = planningSlotsByDay.get(day) || [];
+      planningRows.forEach((row) => {
+        const rowStartMinutes = parseTimeToMinutes(row.start);
+        const activeSlot = daySlots.find((slot) => {
+          const startMinutes = parseTimeToMinutes(slot.startTime);
+          const endMinutes = parseTimeToMinutes(slot.endTime);
+          return rowStartMinutes >= startMinutes && rowStartMinutes < endMinutes;
+        });
+        if (activeSlot) {
+          map.set(`${day}|${row.start}`, activeSlot);
+        }
+      });
+    });
+    return map;
+  }, [planningRows, planningSlotsByDay]);
+
   const latestScheduleEndTime = useMemo(() => {
     if (schedules.length === 0) return "--:--";
     return schedules.reduce((latest, slot) => {
@@ -419,16 +460,6 @@ export default function UserProfile() {
       return endIndex - startIndex;
     }
     return 1;
-  };
-
-  const isPlanningTimeCovered = (day: string, rowStart: string): boolean => {
-    const currentMinutes = parseTimeToMinutes(rowStart);
-    return schedules.some((slot) => {
-      if (slot.day !== day) return false;
-      const startMinutes = parseTimeToMinutes(slot.startTime);
-      const endMinutes = parseTimeToMinutes(slot.endTime);
-      return startMinutes <= currentMinutes && currentMinutes < endMinutes;
-    });
   };
 
   const hasRegistrationDate = hasValidDate(profileData.registrationDate);
@@ -505,7 +536,6 @@ export default function UserProfile() {
       description: "Les informations ont ete enregistrees.",
     });
     setIsEditing(false);
-    window.location.reload();
   };
 
   if (isLoading) {
@@ -619,7 +649,120 @@ export default function UserProfile() {
                     </div>
                   )}
 
-                  <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/60">
+                  <div className="space-y-3 md:hidden">
+                    {!isPlanningMobileRotated ? (
+                      <div className="space-y-3">
+                        {SCHEDULE_DAYS.map((day) => {
+                          const daySlots = planningSlotsByDay.get(day) || [];
+                          return (
+                            <article key={day} className="rounded-xl border border-border/60 bg-card/70 p-3">
+                              <h3 className="font-display text-base text-foreground">{day}</h3>
+                              <div className="mt-2 space-y-2">
+                                {daySlots.length === 0 ? (
+                                  <p className="rounded-md border border-dashed border-border/35 bg-secondary/15 px-3 py-2 text-xs text-muted-foreground">
+                                    Aucune session
+                                  </p>
+                                ) : (
+                                  daySlots.map((slot) => {
+                                    const group = groupsById.get(slot.groupId);
+                                    const colorClasses = getGroupColorClasses(group?.color);
+                                    const isUserGroup = !!group && userGroupIds.includes(group.id);
+                                    return (
+                                      <div
+                                        key={slot.id}
+                                        className={cn(
+                                          "rounded-md border px-3 py-2",
+                                          colorClasses.filledCell,
+                                          isUserGroup && "ring-2 ring-primary/50 ring-offset-1 ring-offset-card"
+                                        )}
+                                      >
+                                        <p className="text-xs font-semibold text-foreground">{group?.name || "Groupe"}</p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                          {formatPlanningRange(slot.startTime, slot.endTime)}
+                                        </p>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/60">
+                        <table className="w-full min-w-[680px] border-separate border-spacing-0">
+                          <thead>
+                            <tr>
+                              <th className="sticky left-0 top-0 z-20 min-w-[112px] bg-card/95 p-2 text-left font-display text-xs text-foreground">
+                                Horaire
+                              </th>
+                              {SCHEDULE_DAYS.map((day) => (
+                                <th
+                                  key={day}
+                                  className="sticky top-0 z-10 min-w-[92px] bg-card/90 p-2 text-center font-display text-xs text-foreground"
+                                >
+                                  {day.slice(0, 3).toUpperCase()}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {planningRows.map((row, rowIndex) => (
+                              <tr key={`${row.start}-${row.end}`} className={rowIndex % 2 === 0 ? "bg-secondary/10" : ""}>
+                                <th className="sticky left-0 z-10 border-t border-border/30 bg-card/95 p-2 text-left text-[11px] text-foreground">
+                                  {formatPlanningRange(row.start, row.end)}
+                                </th>
+                                {SCHEDULE_DAYS.map((day) => {
+                                  const activeSlot = planningActiveSlotMap.get(`${day}|${row.start}`);
+                                  if (!activeSlot) {
+                                    return (
+                                      <td key={`${day}-${row.start}`} className="border-t border-border/30 p-1 align-top">
+                                        <div className="h-[42px] rounded-md border border-dashed border-border/30 bg-secondary/10" />
+                                      </td>
+                                    );
+                                  }
+
+                                  const group = groupsById.get(activeSlot.groupId);
+                                  const colorClasses = getGroupColorClasses(group?.color);
+                                  const isUserGroup = !!group && userGroupIds.includes(group.id);
+
+                                  return (
+                                    <td key={`${day}-${row.start}-${activeSlot.id}`} className="border-t border-border/30 p-1 align-top">
+                                      <div
+                                        className={cn(
+                                          "min-h-[42px] rounded-md border px-2 py-1",
+                                          colorClasses.filledCell,
+                                          isUserGroup && "ring-2 ring-primary/50 ring-offset-1 ring-offset-card"
+                                        )}
+                                      >
+                                        <p className="line-clamp-1 text-[11px] font-semibold text-foreground">
+                                          {group?.name || "Groupe"}
+                                        </p>
+                                      </div>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    <div className="flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => setIsPlanningMobileRotated((value) => !value)}
+                        className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-secondary/35 px-4 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary/60"
+                      >
+                        <RotateCw className={cn("h-3.5 w-3.5 transition-transform", isPlanningMobileRotated && "rotate-180")} />
+                        {isPlanningMobileRotated ? "Revenir a la vue jour" : "Rotation de l'emploi"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="hidden md:block overflow-x-auto rounded-xl border border-border/60 bg-card/60">
                     <table className="w-full min-w-[780px] border-separate border-spacing-0">
                       <thead>
                         <tr>
@@ -669,7 +812,7 @@ export default function UserProfile() {
                                 );
                               }
 
-                              if (isPlanningTimeCovered(day, row.start)) {
+                              if (planningActiveSlotMap.has(`${day}|${row.start}`)) {
                                 return null;
                               }
 

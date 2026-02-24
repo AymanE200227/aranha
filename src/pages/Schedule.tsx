@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
-import { Calendar, Clock3, Layers3, Sparkles } from "lucide-react";
+import { Clock3, Layers3, RotateCw, Sparkles } from "lucide-react";
 import { getSchedules, getGroups } from "@/lib/storage";
 import { Group, ScheduleSlot } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
@@ -19,11 +19,21 @@ import {
   parseTimeToMinutes,
 } from "@/lib/schedule";
 
+const MOBILE_FALLBACK_BOUNDARIES = ["18:00", "19:00", "21:00", SCHEDULE_DAY_END_LABEL];
+
+const formatMinutesToTime = (minutes: number): string => {
+  const normalized = Math.max(0, minutes);
+  const hour = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+};
+
 const Schedule = () => {
   const { isAuthenticated, user } = useAuth();
   const content = useAppContent();
   const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [isMobileTableRotated, setIsMobileTableRotated] = useState(false);
   const timeLabels = useMemo(() => [...SCHEDULE_TIME_SLOTS, SCHEDULE_DAY_END_LABEL], []);
 
   const loadData = useCallback(() => {
@@ -48,6 +58,28 @@ const Schedule = () => {
     return new Map(groups.map((group) => [group.id, group]));
   }, [groups]);
 
+  const schedulesByDay = useMemo(() => {
+    const map = new Map<string, ScheduleSlot[]>();
+    SCHEDULE_DAYS.forEach((day) => {
+      map.set(day, []);
+    });
+
+    schedules.forEach((slot) => {
+      map.get(slot.day)?.push(slot);
+    });
+
+    map.forEach((daySlots, day) => {
+      map.set(
+        day,
+        [...daySlots].sort(
+          (left, right) => parseTimeToMinutes(left.startTime) - parseTimeToMinutes(right.startTime)
+        )
+      );
+    });
+
+    return map;
+  }, [schedules]);
+
   const slotStartMap = useMemo(() => {
     const map = new Map<string, ScheduleSlot>();
     schedules.forEach((slot) => {
@@ -55,6 +87,35 @@ const Schedule = () => {
     });
     return map;
   }, [schedules]);
+
+  const coveredTimesByDay = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    SCHEDULE_DAYS.forEach((day) => {
+      map.set(day, new Set<string>());
+    });
+
+    const timeSlotMinutes = SCHEDULE_TIME_SLOTS.map((time) => ({
+      time,
+      minutes: parseTimeToMinutes(time),
+    }));
+
+    schedulesByDay.forEach((daySlots, day) => {
+      const coveredTimes = map.get(day);
+      if (!coveredTimes) return;
+
+      daySlots.forEach((slot) => {
+        const startMinutes = parseTimeToMinutes(slot.startTime);
+        const endMinutes = parseTimeToMinutes(slot.endTime);
+        timeSlotMinutes.forEach(({ time, minutes }) => {
+          if (minutes >= startMinutes && minutes < endMinutes) {
+            coveredTimes.add(time);
+          }
+        });
+      });
+    });
+
+    return map;
+  }, [schedulesByDay]);
 
   const totalHours = useMemo(() => {
     return schedules.reduce((sum, slot) => sum + getDurationHoursFromTimes(slot.startTime, slot.endTime), 0);
@@ -66,16 +127,49 @@ const Schedule = () => {
     [groups, userGroupIds]
   );
 
-  const isCellCoveredByAnySlot = (day: string, time: string): boolean => {
-    const currentTime = parseTimeToMinutes(time);
-    return schedules.some((slot) => {
-      if (slot.day !== day) return false;
-      return parseTimeToMinutes(slot.startTime) <= currentTime && parseTimeToMinutes(slot.endTime) > currentTime;
+  const mobileTimeBoundaries = useMemo(() => {
+    const values = new Set<number>();
+    schedules.forEach((slot) => {
+      values.add(parseTimeToMinutes(slot.startTime));
+      values.add(parseTimeToMinutes(slot.endTime));
     });
-  };
+    values.add(parseTimeToMinutes(SCHEDULE_DAY_END_LABEL));
+
+    const sorted = Array.from(values).sort((left, right) => left - right);
+    if (sorted.length < 2) return MOBILE_FALLBACK_BOUNDARIES;
+
+    return sorted.map((minutes) => formatMinutesToTime(minutes));
+  }, [schedules]);
+
+  const mobileTimeRows = useMemo(() => {
+    return mobileTimeBoundaries.slice(0, -1).map((start, index) => ({
+      start,
+      end: mobileTimeBoundaries[index + 1],
+    }));
+  }, [mobileTimeBoundaries]);
+
+  const mobileActiveSlotMap = useMemo(() => {
+    const map = new Map<string, ScheduleSlot>();
+    SCHEDULE_DAYS.forEach((day) => {
+      const daySlots = schedulesByDay.get(day) || [];
+      mobileTimeRows.forEach((row) => {
+        const rowStartMinutes = parseTimeToMinutes(row.start);
+        const activeSlot = daySlots.find((slot) => {
+          const startMinutes = parseTimeToMinutes(slot.startTime);
+          const endMinutes = parseTimeToMinutes(slot.endTime);
+          return rowStartMinutes >= startMinutes && rowStartMinutes < endMinutes;
+        });
+        if (activeSlot) {
+          map.set(`${day}|${row.start}`, activeSlot);
+        }
+      });
+    });
+    return map;
+  }, [mobileTimeRows, schedulesByDay]);
 
   const renderDayCells = (day: string) => {
     const cells: JSX.Element[] = [];
+    const coveredTimes = coveredTimesByDay.get(day) || new Set<string>();
 
     let columnIndex = 0;
     while (columnIndex < SCHEDULE_TIME_SLOTS.length) {
@@ -111,7 +205,7 @@ const Schedule = () => {
         continue;
       }
 
-      if (isCellCoveredByAnySlot(day, currentTime)) {
+      if (coveredTimes.has(currentTime)) {
         columnIndex += 1;
         continue;
       }
@@ -199,26 +293,137 @@ const Schedule = () => {
           </div>
 
           {/* Schedule Grid */}
-          <div className="card-elevated p-3 sm:p-4 overflow-x-auto border-border/70 bg-gradient-to-b from-card to-secondary/10">
+          <div className="space-y-3 md:hidden">
+            {!isMobileTableRotated ? (
+              <div className="space-y-3">
+                {SCHEDULE_DAYS.map((day) => {
+                  const daySlots = schedulesByDay.get(day) || [];
+                  return (
+                    <article key={day} className="rounded-xl border border-border/60 bg-card/70 p-3">
+                      <h3 className="font-display text-base text-foreground">{day}</h3>
+                      <div className="mt-2 space-y-2">
+                        {daySlots.length === 0 ? (
+                          <p className="rounded-md border border-dashed border-border/40 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
+                            Aucune session
+                          </p>
+                        ) : (
+                          daySlots.map((slot) => {
+                            const group = groupsById.get(slot.groupId);
+                            const colorClasses = getGroupColorClasses(group?.color);
+                            const isUserGroup = !!group && userGroupIds.includes(group.id);
+                            return (
+                              <div
+                                key={slot.id}
+                                className={cn(
+                                  "rounded-md border px-3 py-2",
+                                  colorClasses.filledCell,
+                                  isUserGroup && "ring-2 ring-primary/60 ring-offset-1 ring-offset-card"
+                                )}
+                              >
+                                <p className="text-xs font-semibold text-foreground">{group?.name || "Groupe"}</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {formatTimeRange(slot.startTime, slot.endTime)}
+                                </p>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/70">
+                <table className="w-full min-w-[680px] border-separate border-spacing-0">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 top-0 z-20 min-w-[112px] bg-card/95 p-2 text-left font-display text-xs text-foreground">
+                        Horaire
+                      </th>
+                      {SCHEDULE_DAYS.map((day) => (
+                        <th
+                          key={day}
+                          className="sticky top-0 z-10 min-w-[92px] bg-card/90 p-2 text-center font-display text-xs text-foreground"
+                        >
+                          {day.slice(0, 3).toUpperCase()}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mobileTimeRows.map((row, rowIndex) => (
+                      <tr key={`${row.start}-${row.end}`} className={rowIndex % 2 === 0 ? "bg-secondary/10" : ""}>
+                        <th className="sticky left-0 z-10 border-t border-border/30 bg-card/95 p-2 text-left text-[11px] text-foreground">
+                          {formatTimeRange(row.start, row.end)}
+                        </th>
+                        {SCHEDULE_DAYS.map((day) => {
+                          const activeSlot = mobileActiveSlotMap.get(`${day}|${row.start}`);
+                          if (!activeSlot) {
+                            return (
+                              <td key={`${day}-${row.start}`} className="border-t border-border/30 p-1 align-top">
+                                <div className="h-[42px] rounded-md border border-dashed border-border/30 bg-secondary/10" />
+                              </td>
+                            );
+                          }
+
+                          const group = groupsById.get(activeSlot.groupId);
+                          const colorClasses = getGroupColorClasses(group?.color);
+                          const isUserGroup = !!group && userGroupIds.includes(group.id);
+
+                          return (
+                            <td key={`${day}-${row.start}-${activeSlot.id}`} className="border-t border-border/30 p-1 align-top">
+                              <div
+                                className={cn(
+                                  "min-h-[42px] rounded-md border px-2 py-1",
+                                  colorClasses.filledCell,
+                                  isUserGroup && "ring-2 ring-primary/50 ring-offset-1 ring-offset-card"
+                                )}
+                              >
+                                <p className="line-clamp-1 text-[11px] font-semibold text-foreground">{group?.name || "Groupe"}</p>
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => setIsMobileTableRotated((value) => !value)}
+                className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-secondary/35 px-4 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary/60"
+              >
+                <RotateCw className={cn("h-3.5 w-3.5 transition-transform", isMobileTableRotated && "rotate-180")} />
+                {isMobileTableRotated ? "Revenir a la vue jour" : "Rotation de l'emploi"}
+              </button>
+            </div>
+          </div>
+
+          <div className="hidden md:block card-elevated p-3 sm:p-4 overflow-x-auto border-border/70 bg-gradient-to-b from-card to-secondary/10">
             <table className="w-full min-w-[1660px] border-separate border-spacing-0">
               <thead>
                 <tr>
                   <th className="sticky top-0 left-0 z-20 bg-card/95 backdrop-blur p-2 sm:p-3 text-left font-display text-foreground min-w-[120px]">
                     {content["schedule.table.day"]}
                   </th>
-                {timeLabels.map((time, timeIndex) => (
-                  <th
-                    key={time}
-                    className={cn(
-                      "sticky top-0 z-10 bg-card/90 backdrop-blur p-1.5 sm:p-2 text-center font-mono text-[11px] sm:text-xs text-muted-foreground min-w-[46px] sm:min-w-[50px]",
-                      timeIndex === timeLabels.length - 1 && "text-primary border-l border-primary/30"
-                    )}
-                  >
-                    {time}
-                  </th>
-                ))}
-              </tr>
-            </thead>
+                  {timeLabels.map((time, timeIndex) => (
+                    <th
+                      key={time}
+                      className={cn(
+                        "sticky top-0 z-10 bg-card/90 backdrop-blur p-1.5 sm:p-2 text-center font-mono text-[11px] sm:text-xs text-muted-foreground min-w-[46px] sm:min-w-[50px]",
+                        timeIndex === timeLabels.length - 1 && "text-primary border-l border-primary/30"
+                      )}
+                    >
+                      {time}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
                 {SCHEDULE_DAYS.map((day) => (
                   <tr key={day} className="border-t border-border/30 even:bg-secondary/10">
