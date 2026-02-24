@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Sora:wght@300;400;500;600;700;800&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -89,14 +89,42 @@
     background-color: hsl(var(--background));
   }
 
+  html {
+    scroll-behavior: smooth;
+    color-scheme: dark;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', sans-serif;
+    font-family: "Sora", sans-serif;
     overflow-x: hidden;
+    letter-spacing: 0.01em;
+    line-height: 1.55;
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.3);
+    color: hsl(var(--foreground));
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--navy-light) / 0.7);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: linear-gradient(180deg, hsl(var(--gold-light)), hsl(var(--gold-dark)));
+    border: 2px solid hsl(var(--navy-light));
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: "Bebas Neue", sans-serif;
     letter-spacing: 0.05em;
   }
 }
@@ -163,6 +191,24 @@
   .stat-card {
     @apply p-4 rounded-xl border border-border/50;
     background: linear-gradient(145deg, hsl(222 40% 14%), hsl(222 45% 10%));
+  }
+
+  .surface-panel {
+    @apply rounded-2xl border border-border/60 bg-card/80 backdrop-blur-xl;
+    box-shadow: 0 20px 48px -28px hsl(0 0% 0% / 0.8);
+  }
+
+  .nav-link-pill {
+    @apply relative inline-flex items-center rounded-full px-3 py-1.5 text-sm font-medium transition-all duration-300;
+  }
+
+  .nav-link-pill::after {
+    content: "";
+    @apply absolute left-1/2 top-full mt-1 h-0.5 w-0 -translate-x-1/2 rounded-full bg-primary transition-all duration-300;
+  }
+
+  .nav-link-pill.active::after {
+    @apply w-8;
   }
 }
 
@@ -231,5 +277,50 @@
 
   .image-glow:hover::before {
     opacity: 1;
+  }
+
+  .page-enter {
+    animation: page-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes page-enter {
+    0% {
+      opacity: 0;
+      transform: translateY(10px);
+      filter: blur(6px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+  }
+
+  .animate-loader-sweep {
+    animation: loader-sweep 1.3s ease-in-out infinite;
+  }
+
+  @keyframes loader-sweep {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(220%);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
