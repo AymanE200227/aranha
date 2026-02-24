@@ -30,9 +30,11 @@ import { cn } from "@/lib/utils";
 import { getGroupColorClasses } from "@/lib/groupColors";
 import {
   SCHEDULE_DAYS,
+  SCHEDULE_SLOT_INTERVAL_MINUTES,
   SCHEDULE_TIME_SLOTS,
   buildSlotFromIndexes,
   findOverlappingSchedule,
+  formatDurationFromSlots,
   formatTimeRange,
   getDurationHoursFromTimes,
   getSlotSpan,
@@ -56,7 +58,7 @@ const AdminSchedules = () => {
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [pendingRange, setPendingRange] = useState<PendingRange | null>(null);
-  const [durationHours, setDurationHours] = useState(1);
+  const [durationSlots, setDurationSlots] = useState(1);
 
   useEffect(() => {
     if (!isLoading && (!isAuthenticated || !isAdmin)) {
@@ -133,7 +135,7 @@ const AdminSchedules = () => {
     }
 
     setPendingRange({ day, startIndex });
-    setDurationHours(1);
+    setDurationSlots(1);
     setIsDialogOpen(true);
   };
 
@@ -150,13 +152,13 @@ const AdminSchedules = () => {
   };
 
   const maxDurationForDialog = pendingRange ? getMaxDurationForStart(pendingRange.day, pendingRange.startIndex) : 1;
-  const safeDuration = Math.min(Math.max(1, durationHours), maxDurationForDialog);
+  const safeDuration = Math.min(Math.max(1, durationSlots), maxDurationForDialog);
 
   useEffect(() => {
-    if (safeDuration !== durationHours) {
-      setDurationHours(safeDuration);
+    if (safeDuration !== durationSlots) {
+      setDurationSlots(safeDuration);
     }
-  }, [safeDuration, durationHours]);
+  }, [safeDuration, durationSlots]);
 
   const handleCreateSlot = () => {
     if (!pendingRange || !selectedGroup) {
@@ -182,11 +184,11 @@ const AdminSchedules = () => {
       ...candidate,
     });
 
-    toast.success(`Session ${safeDuration}h ajoutee (${candidate.startTime} - ${candidate.endTime})`);
+    toast.success(`Session ${formatDurationFromSlots(safeDuration)} ajoutee (${candidate.startTime} - ${candidate.endTime})`);
     setIsDialogOpen(false);
     setPendingRange(null);
     setSelectedGroup("");
-    setDurationHours(1);
+    setDurationSlots(1);
     loadData();
   };
 
@@ -284,7 +286,8 @@ const AdminSchedules = () => {
               EMPLOIS DU <span className="text-gradient-gold">TEMPS</span>
             </h1>
             <p className="text-muted-foreground mt-1">
-              Cliquez une case vide puis choisissez 1h, 2h, 3h ou plus. Cliquez un bloc existant pour le supprimer.
+              Cliquez une case vide puis choisissez une duree (pas de {SCHEDULE_SLOT_INTERVAL_MINUTES} min). Cliquez un
+              bloc existant pour le supprimer.
             </p>
           </div>
 
@@ -295,7 +298,7 @@ const AdminSchedules = () => {
             </div>
             <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-2">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Heures totales</p>
-              <p className="font-display text-xl text-foreground">{totalHoursPlanned}h</p>
+              <p className="font-display text-xl text-foreground">{totalHoursPlanned.toFixed(1).replace(".0", "")}h</p>
             </div>
             <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-2">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Jusqu a</p>
@@ -318,7 +321,7 @@ const AdminSchedules = () => {
         </div>
 
         <div className="card-elevated p-3 sm:p-4 overflow-x-auto">
-          <table className="w-full min-w-[1220px] border-separate border-spacing-0">
+          <table className="w-full min-w-[2360px] border-separate border-spacing-0">
             <thead>
               <tr>
                 <th className="sticky left-0 z-20 bg-card p-2 sm:p-3 text-left font-display text-foreground min-w-[120px]">
@@ -365,7 +368,7 @@ const AdminSchedules = () => {
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-muted-foreground">
                     <Clock3 className="h-4 w-4" />
-                    <span>Duree: {safeDuration}h</span>
+                    <span>Duree: {formatDurationFromSlots(safeDuration)}</span>
                   </div>
                 </div>
               )}
@@ -394,14 +397,14 @@ const AdminSchedules = () => {
 
               <div>
                 <p className="mb-2 text-sm font-medium text-foreground">Duree</p>
-                <Select value={String(safeDuration)} onValueChange={(value) => setDurationHours(Number(value))}>
+                <Select value={String(safeDuration)} onValueChange={(value) => setDurationSlots(Number(value))}>
                   <SelectTrigger className="bg-secondary">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {Array.from({ length: maxDurationForDialog }, (_, index) => index + 1).map((duration) => (
                       <SelectItem key={duration} value={String(duration)}>
-                        {duration} heure{duration > 1 ? "s" : ""}
+                        {formatDurationFromSlots(duration)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -409,7 +412,7 @@ const AdminSchedules = () => {
               </div>
 
               <Button onClick={handleCreateSlot} variant="gold" className="w-full">
-                Creer la session ({safeDuration}h)
+                Creer la session ({formatDurationFromSlots(safeDuration)})
               </Button>
             </div>
           </DialogContent>

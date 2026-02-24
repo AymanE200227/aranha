@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAppContent } from "@/hooks/useAppContent";
 import { cn } from "@/lib/utils";
 import { getGroupColorClasses } from "@/lib/groupColors";
+import { getUserGroupIds } from "@/lib/userGroups";
 import {
   SCHEDULE_DAYS,
   SCHEDULE_DAY_END_LABEL,
@@ -15,6 +16,7 @@ import {
   formatTimeRange,
   getDurationHoursFromTimes,
   getSlotSpan,
+  parseTimeToMinutes,
 } from "@/lib/schedule";
 
 const Schedule = () => {
@@ -44,10 +46,18 @@ const Schedule = () => {
     return schedules.reduce((sum, slot) => sum + getDurationHoursFromTimes(slot.startTime, slot.endTime), 0);
   }, [schedules]);
 
-  const userGroup = user?.groupId ? groups.find((group) => group.id === user.groupId) : null;
+  const userGroupIds = useMemo(() => getUserGroupIds(user), [user]);
+  const userGroups = useMemo(
+    () => groups.filter((group) => userGroupIds.includes(group.id)),
+    [groups, userGroupIds]
+  );
 
   const isCellCoveredByAnySlot = (day: string, time: string): boolean => {
-    return schedules.some((slot) => slot.day === day && slot.startTime <= time && slot.endTime > time);
+    const currentTime = parseTimeToMinutes(time);
+    return schedules.some((slot) => {
+      if (slot.day !== day) return false;
+      return parseTimeToMinutes(slot.startTime) <= currentTime && parseTimeToMinutes(slot.endTime) > currentTime;
+    });
   };
 
   const renderDayCells = (day: string) => {
@@ -65,7 +75,7 @@ const Schedule = () => {
           Math.min(getSlotSpan(startingSlot, SCHEDULE_TIME_SLOTS), SCHEDULE_TIME_SLOTS.length - columnIndex)
         );
         const colorClasses = getGroupColorClasses(group?.color);
-        const isUserGroup = !!group && user?.groupId === group.id;
+        const isUserGroup = !!group && userGroupIds.includes(group.id);
 
         cells.push(
           <td key={`${day}-${startingSlot.id}`} colSpan={span} className="p-1 align-top">
@@ -134,15 +144,21 @@ const Schedule = () => {
             </div>
             <div className="rounded-xl border border-border/60 bg-secondary/20 px-4 py-3 text-center">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Heures planifiees</p>
-              <p className="font-display text-2xl text-foreground">{totalHours}h</p>
+              <p className="font-display text-2xl text-foreground">{totalHours.toFixed(1).replace(".0", "")}h</p>
             </div>
           </div>
 
           {/* User Group Info */}
-          {isAuthenticated && userGroup && (
+          {isAuthenticated && userGroups.length > 0 && (
             <div className="mb-6 p-4 rounded-lg bg-primary/10 border border-primary/30 text-center max-w-md mx-auto">
               <p className="text-sm text-muted-foreground">{content["schedule.user_group_label"]}</p>
-              <p className="font-display text-lg text-primary">{userGroup.name}</p>
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                {userGroups.map((group) => (
+                  <p key={group.id} className="font-display text-base text-primary">
+                    {group.name}
+                  </p>
+                ))}
+              </div>
             </div>
           )}
 
@@ -161,7 +177,7 @@ const Schedule = () => {
 
           {/* Schedule Grid */}
           <div className="card-elevated p-3 sm:p-4 overflow-x-auto">
-            <table className="w-full min-w-[1220px] border-separate border-spacing-0">
+            <table className="w-full min-w-[2360px] border-separate border-spacing-0">
               <thead>
                 <tr>
                   <th className="sticky left-0 z-20 bg-card p-2 sm:p-3 text-left font-display text-foreground min-w-[120px]">

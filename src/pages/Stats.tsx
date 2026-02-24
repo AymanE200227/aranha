@@ -13,6 +13,7 @@ import { fr } from "date-fns/locale";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScheduleSlot, Group } from "@/lib/types";
 import { getGroupColorClasses } from "@/lib/groupColors";
+import { getUserGroupIds } from "@/lib/userGroups";
 
 type WeeklyStat = {
   name: string;
@@ -21,6 +22,7 @@ type WeeklyStat = {
 };
 
 type AttendanceHistoryItem = {
+  scheduleId: string;
   date: string;
   dayName: string;
   formattedDate: string;
@@ -36,7 +38,7 @@ const Stats = () => {
   const [attendanceHistory, setAttendanceHistory] = useState<AttendanceHistoryItem[]>([]);
   const [totalPresent, setTotalPresent] = useState(0);
   const [totalAbsent, setTotalAbsent] = useState(0);
-  const [userGroup, setUserGroup] = useState<Group | null>(null);
+  const [userGroups, setUserGroups] = useState<Group[]>([]);
   const [userSchedules, setUserSchedules] = useState<ScheduleSlot[]>([]);
 
   const loadUserStats = useCallback(() => {
@@ -46,10 +48,11 @@ const Stats = () => {
     const schedules = getSchedules();
     const groups = getGroups();
 
-    const group = user.groupId ? groups.find((g) => g.id === user.groupId) : null;
-    setUserGroup(group || null);
+    const userGroupIds = getUserGroupIds(user);
+    const groupsForUser = groups.filter((g) => userGroupIds.includes(g.id));
+    setUserGroups(groupsForUser);
 
-    const groupSchedules = user.groupId ? schedules.filter((s) => s.groupId === user.groupId) : [];
+    const groupSchedules = userGroupIds.length ? schedules.filter((s) => userGroupIds.includes(s.groupId)) : [];
     setUserSchedules(groupSchedules);
 
     const present = attendance.filter((a) => a.status === "present").length;
@@ -81,6 +84,7 @@ const Stats = () => {
         const scheduleGroup = schedule ? groups.find((g) => g.id === schedule.groupId) : null;
 
         return {
+          scheduleId: a.scheduleSlotId,
           date: a.date,
           dayName: format(parseISO(a.date), "EEEE", { locale: fr }),
           formattedDate: format(parseISO(a.date), "d MMMM yyyy", { locale: fr }),
@@ -152,11 +156,15 @@ const Stats = () => {
           ) : (
             <>
               {/* User Group Badge */}
-              {userGroup && (
+              {userGroups.length > 0 && (
                 <div className="flex justify-center mb-8">
-                  <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border ${getGroupColorClasses(userGroup.color).badge}`}>
+                  <div className="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2 rounded-full border border-primary/30 bg-primary/5">
                     <span className="font-medium">{content["stats.group_label"]}</span>
-                    <span className="font-display">{userGroup.name}</span>
+                    {userGroups.map((group) => (
+                      <span key={group.id} className={`rounded-full px-2 py-0.5 text-sm ${getGroupColorClasses(group.color).badge}`}>
+                        {group.name}
+                      </span>
+                    ))}
                   </div>
                 </div>
               )}
@@ -301,7 +309,7 @@ const Stats = () => {
                       {content["stats.schedule.title"]}
                     </h3>
 
-                    {!userGroup ? (
+                    {userGroups.length === 0 ? (
                       <div className="p-8 text-center text-muted-foreground">
                         <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
                         <p>{content["stats.schedule.no_group"]}</p>
@@ -315,19 +323,15 @@ const Stats = () => {
                     ) : (
                       <div className="space-y-4">
                         {userSchedules.map((schedule) => {
-                          const slotAttendance = attendanceHistory.filter(
-                            (a) =>
-                              a.time === `${schedule.startTime} - ${schedule.endTime}` &&
-                              a.groupName === userGroup?.name &&
-                              a.dayName.toLowerCase() === schedule.day.toLowerCase()
-                          );
+                          const scheduleGroup = userGroups.find((g) => g.id === schedule.groupId);
+                          const slotAttendance = attendanceHistory.filter((a) => a.scheduleId === schedule.id);
                           const presentCount = slotAttendance.filter((a) => a.status === "present").length;
                           const absentCount = slotAttendance.filter((a) => a.status === "absent").length;
 
                           return (
                             <div
                               key={schedule.id}
-                              className={`p-4 rounded-lg border-2 ${getGroupColorClasses(userGroup.color).filledCell}`}
+                              className={`p-4 rounded-lg border-2 ${getGroupColorClasses(scheduleGroup?.color).filledCell}`}
                             >
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-4">
@@ -336,6 +340,7 @@ const Stats = () => {
                                     <div className="text-sm text-muted-foreground">
                                       {schedule.startTime} - {schedule.endTime}
                                     </div>
+                                    <div className="text-xs text-muted-foreground">{scheduleGroup?.name || "-"}</div>
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-4">

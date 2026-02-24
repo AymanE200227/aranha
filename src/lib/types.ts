@@ -8,6 +8,7 @@ export interface User {
   password: string;
   role: "admin" | "client";
   groupId: string | null;
+  groupIds?: string[];
   createdAt: string;
   profilePicture?: string;
   bio?: string;

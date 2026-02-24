@@ -13,6 +13,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { getUsers, getGroups, getSchedules, getAttendance } from "@/lib/storage";
 import AdminShell from "@/components/admin/AdminShell";
+import { getUserGroupIds } from "@/lib/userGroups";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -56,7 +57,11 @@ const AdminDashboard = () => {
       .slice(0, 3)
       .map((u) => ({
         name: u.name,
-        group: groups.find((g) => g.id === u.groupId)?.name || "Sans groupe",
+        group:
+          getUserGroupIds(u)
+            .map((groupId) => groups.find((g) => g.id === groupId)?.name)
+            .filter((name): name is string => Boolean(name))
+            .join(", ") || "Sans groupe",
         joined: getRelativeTime(u.createdAt),
       }));
     setRecentUsers(clientUsers);

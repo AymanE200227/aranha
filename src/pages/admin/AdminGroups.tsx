@@ -31,6 +31,7 @@ import { getGroups, createGroup, updateGroup, deleteGroup, getUsers } from "@/li
 import { useAuth } from "@/hooks/useAuth";
 import AdminShell from "@/components/admin/AdminShell";
 import { GROUP_COLOR_OPTIONS, getGroupColorClasses } from "@/lib/groupColors";
+import { isUserInGroup } from "@/lib/userGroups";
 
 const AdminGroups = () => {
   const navigate = useNavigate();
@@ -86,7 +87,7 @@ const AdminGroups = () => {
   };
 
   const handleDelete = (id: string) => {
-    const usersInGroup = users.filter((u) => u.groupId === id);
+    const usersInGroup = users.filter((u) => isUserInGroup(u, id));
     if (usersInGroup.length > 0) {
       toast.error(`Ce groupe contient ${usersInGroup.length} utilisateur(s). Veuillez les reassigner d'abord.`);
       return;
@@ -110,7 +111,7 @@ const AdminGroups = () => {
   };
 
   const getMemberCount = (groupId: string) => {
-    return users.filter((u) => u.groupId === groupId).length;
+    return users.filter((u) => isUserInGroup(u, groupId)).length;
   };
 
   if (isLoading) return null;

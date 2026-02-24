@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -43,7 +44,7 @@ const AdminUsers = () => {
     email: "",
     password: "",
     role: "client" as "admin" | "client",
-    groupId: "",
+    groupIds: [] as string[],
   });
 
   useEffect(() => {
@@ -63,21 +64,34 @@ const AdminUsers = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    const payload = {
+      name: formData.name,
+      email: formData.email,
+      role: formData.role,
+      groupIds: formData.groupIds,
+      groupId: formData.groupIds[0] || null,
+    };
+
     if (editingUser) {
-      updateUser(editingUser.id, {
-        ...formData,
-        groupId: formData.groupId || null,
-      });
+      const updatePayload = {
+        ...payload,
+        ...(formData.password.trim() ? { password: formData.password } : {}),
+      };
+      updateUser(editingUser.id, updatePayload);
       toast.success("Utilisateur modifie avec succes");
     } else {
+      if (!formData.password.trim()) {
+        toast.error("Le mot de passe est obligatoire");
+        return;
+      }
       createUser({
-        ...formData,
-        groupId: formData.groupId || null,
+        ...payload,
+        password: formData.password,
       });
       toast.success("Utilisateur cree avec succes");
     }
-    
+
     resetForm();
     loadData();
   };
@@ -87,9 +101,9 @@ const AdminUsers = () => {
     setFormData({
       name: user.name,
       email: user.email,
-      password: user.password,
+      password: "",
       role: user.role,
-      groupId: user.groupId || "",
+      groupIds: Array.from(new Set([...(user.groupIds || []), user.groupId].filter(Boolean))) as string[],
     });
     setIsDialogOpen(true);
   };
@@ -103,7 +117,7 @@ const AdminUsers = () => {
   };
 
   const resetForm = () => {
-    setFormData({ name: "", email: "", password: "", role: "client", groupId: "" });
+    setFormData({ name: "", email: "", password: "", role: "client", groupIds: [] });
     setEditingUser(null);
     setIsDialogOpen(false);
   };
@@ -119,9 +133,22 @@ const AdminUsers = () => {
       u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const getGroupName = (groupId: string | null) => {
-    if (!groupId) return "-";
-    return groups.find((g) => g.id === groupId)?.name || "-";
+  const getGroupNames = (user: User) => {
+    const ids = Array.from(new Set([...(user.groupIds || []), user.groupId].filter(Boolean))) as string[];
+    if (ids.length === 0) return "-";
+    return ids
+      .map((groupId) => groups.find((g) => g.id === groupId)?.name)
+      .filter((name): name is string => Boolean(name))
+      .join(", ");
+  };
+
+  const toggleGroupSelection = (groupId: string, checked: boolean) => {
+    setFormData((previous) => ({
+      ...previous,
+      groupIds: checked
+        ? Array.from(new Set([...previous.groupIds, groupId]))
+        : previous.groupIds.filter((id) => id !== groupId),
+    }));
   };
 
   if (isLoading) return null;
@@ -183,7 +210,7 @@ const AdminUsers = () => {
                     type="password"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    placeholder="********"
+                    placeholder={editingUser ? "Laisser vide pour conserver l'actuel" : "********"}
                     required={!editingUser}
                     className="mt-1 bg-secondary"
                   />
@@ -204,23 +231,22 @@ const AdminUsers = () => {
                   </Select>
                 </div>
                 <div>
-                  <Label>Groupe</Label>
-                  <Select
-                    value={formData.groupId || "none"}
-                    onValueChange={(v) => setFormData({ ...formData, groupId: v === "none" ? "" : v })}
-                  >
-                    <SelectTrigger className="mt-1 bg-secondary">
-                      <SelectValue placeholder="Selectionner un groupe" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Aucun groupe</SelectItem>
-                      {groups.map((group) => (
-                        <SelectItem key={group.id} value={group.id}>
-                          {group.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label>Groupes</Label>
+                  <div className="mt-2 rounded-md border border-border/60 bg-secondary p-3 space-y-2 max-h-48 overflow-y-auto">
+                    {groups.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Aucun groupe disponible</p>
+                    ) : (
+                      groups.map((group) => (
+                        <label key={group.id} className="flex items-center gap-2 text-sm text-foreground">
+                          <Checkbox
+                            checked={formData.groupIds.includes(group.id)}
+                            onCheckedChange={(checked) => toggleGroupSelection(group.id, Boolean(checked))}
+                          />
+                          <span>{group.name}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
                 </div>
                 <Button type="submit" variant="gold" className="w-full">
                   {editingUser ? "Modifier" : "Creer"}
@@ -249,7 +275,7 @@ const AdminUsers = () => {
                 <th className="text-left p-4 font-display text-foreground">Nom</th>
                 <th className="text-left p-4 font-display text-foreground">Email</th>
                 <th className="text-left p-4 font-display text-foreground">Role</th>
-                <th className="text-left p-4 font-display text-foreground">Groupe</th>
+                <th className="text-left p-4 font-display text-foreground">Groupes</th>
                 <th className="text-right p-4 font-display text-foreground">Actions</th>
               </tr>
             </thead>
@@ -278,7 +304,7 @@ const AdminUsers = () => {
                       {user.role === "admin" ? "Admin" : "Client"}
                     </span>
                   </td>
-                  <td className="p-4 text-muted-foreground">{getGroupName(user.groupId)}</td>
+                  <td className="p-4 text-muted-foreground">{getGroupNames(user)}</td>
                   <td className="p-4 text-right">
                     <div className="flex justify-end gap-2">
                       <Button size="sm" variant="ghost" onClick={() => handleEdit(user)}>

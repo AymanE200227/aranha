@@ -1,15 +1,23 @@
 import type { ScheduleSlot } from "@/lib/types";
 
 export const SCHEDULE_DAYS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"] as const;
-export const SCHEDULE_START_HOUR = 8;
-export const SCHEDULE_END_HOUR = 24;
-export const SCHEDULE_DAY_END_LABEL = "24:00";
+export const SCHEDULE_START_HOUR = 6;
+export const SCHEDULE_END_HOUR = 22;
+export const SCHEDULE_SLOT_INTERVAL_MINUTES = 30;
+export const SCHEDULE_DAY_END_LABEL = `${String(SCHEDULE_END_HOUR).padStart(2, "0")}:00`;
 
 const padHour = (hour: number): string => String(hour).padStart(2, "0");
+const padMinute = (minute: number): string => String(minute).padStart(2, "0");
+const formatMinutesToTime = (minutes: number): string => {
+  const clamped = Math.max(0, minutes);
+  const hour = Math.floor(clamped / 60);
+  const minute = clamped % 60;
+  return `${padHour(hour)}:${padMinute(minute)}`;
+};
 
 export const SCHEDULE_TIME_SLOTS = Array.from(
-  { length: SCHEDULE_END_HOUR - SCHEDULE_START_HOUR },
-  (_, index) => `${padHour(SCHEDULE_START_HOUR + index)}:00`
+  { length: ((SCHEDULE_END_HOUR - SCHEDULE_START_HOUR) * 60) / SCHEDULE_SLOT_INTERVAL_MINUTES },
+  (_, index) => formatMinutesToTime(SCHEDULE_START_HOUR * 60 + index * SCHEDULE_SLOT_INTERVAL_MINUTES)
 );
 
 export const parseTimeToMinutes = (time: string): number => {
@@ -34,7 +42,25 @@ export const getDurationHoursFromTimes = (startTime: string, endTime: string): n
   const startMinutes = parseTimeToMinutes(startTime);
   const endMinutes = parseTimeToMinutes(endTime);
   const minutes = Math.max(0, endMinutes - startMinutes);
-  return Math.max(1, Math.round(minutes / 60));
+  return minutes / 60;
+};
+
+export const getDurationSlotsFromTimes = (startTime: string, endTime: string): number => {
+  const startMinutes = parseTimeToMinutes(startTime);
+  const endMinutes = parseTimeToMinutes(endTime);
+  const minutes = Math.max(0, endMinutes - startMinutes);
+  return Math.max(1, Math.round(minutes / SCHEDULE_SLOT_INTERVAL_MINUTES));
+};
+
+export const formatDurationFromSlots = (slotCount: number): string => {
+  const normalized = Math.max(1, slotCount);
+  const totalMinutes = normalized * SCHEDULE_SLOT_INTERVAL_MINUTES;
+  const hours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+
+  if (hours === 0) return `${remainingMinutes}min`;
+  if (remainingMinutes === 0) return `${hours}h`;
+  return `${hours}h${String(remainingMinutes).padStart(2, "0")}`;
 };
 
 export const getSlotSpan = (slot: ScheduleSlot, slots: string[] = SCHEDULE_TIME_SLOTS): number => {
@@ -43,7 +69,7 @@ export const getSlotSpan = (slot: ScheduleSlot, slots: string[] = SCHEDULE_TIME_
   if (startIndex >= 0 && endIndex > startIndex) {
     return endIndex - startIndex;
   }
-  return getDurationHoursFromTimes(slot.startTime, slot.endTime);
+  return getDurationSlotsFromTimes(slot.startTime, slot.endTime);
 };
 
 export const isTimeCoveredBySlot = (slot: ScheduleSlot, time: string): boolean => {
@@ -62,11 +88,11 @@ export const formatTimeRange = (startTime: string, endTime: string): string => `
 export const buildSlotFromIndexes = (
   day: string,
   startIndex: number,
-  durationHours: number,
+  durationSlots: number,
   slots: string[] = SCHEDULE_TIME_SLOTS
 ): Pick<ScheduleSlot, "day" | "startTime" | "endTime"> => {
   const normalizedStartIndex = Math.max(0, startIndex);
-  const normalizedDuration = Math.max(1, durationHours);
+  const normalizedDuration = Math.max(1, durationSlots);
   const startTime = getTimeByIndex(normalizedStartIndex, slots);
   const endTime = getTimeByIndex(normalizedStartIndex + normalizedDuration, slots);
   return {

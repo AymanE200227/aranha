@@ -1,5 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { User, Group, ScheduleSlot, AttendanceRecord, Album, MediaFile } from "./types";
+import { SCHEDULE_DAY_END_LABEL, SCHEDULE_SLOT_INTERVAL_MINUTES, SCHEDULE_START_HOUR, parseTimeToMinutes } from "@/lib/schedule";
+import { withNormalizedUserGroups } from "@/lib/userGroups";
 
 const REMOTE_TABLE = "app_shared_storage";
 const REMOTE_POLL_INTERVAL_MS = 5000;
@@ -77,6 +79,39 @@ const isRemoteConfigured = (): boolean => {
 const dispatchStorageEvent = (key: string): void => {
   if (!isBrowser()) return;
   window.dispatchEvent(new StorageEvent("storage", { key }));
+};
+
+const formatMinutesToTime = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+};
+
+const normalizeScheduleSlot = (slot: ScheduleSlot): ScheduleSlot => {
+  const minMinutes = SCHEDULE_START_HOUR * 60;
+  const maxMinutes = parseTimeToMinutes(SCHEDULE_DAY_END_LABEL);
+
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+  const snapDown = (value: number) =>
+    minMinutes + Math.floor((value - minMinutes) / SCHEDULE_SLOT_INTERVAL_MINUTES) * SCHEDULE_SLOT_INTERVAL_MINUTES;
+  const snapUp = (value: number) =>
+    minMinutes + Math.ceil((value - minMinutes) / SCHEDULE_SLOT_INTERVAL_MINUTES) * SCHEDULE_SLOT_INTERVAL_MINUTES;
+
+  let startMinutes = clamp(parseTimeToMinutes(slot.startTime), minMinutes, maxMinutes - SCHEDULE_SLOT_INTERVAL_MINUTES);
+  let endMinutes = clamp(parseTimeToMinutes(slot.endTime), minMinutes + SCHEDULE_SLOT_INTERVAL_MINUTES, maxMinutes);
+
+  startMinutes = snapDown(startMinutes);
+  endMinutes = snapUp(endMinutes);
+
+  if (endMinutes <= startMinutes) {
+    endMinutes = Math.min(maxMinutes, startMinutes + SCHEDULE_SLOT_INTERVAL_MINUTES);
+  }
+
+  return {
+    ...slot,
+    startTime: formatMinutesToTime(startMinutes),
+    endTime: formatMinutesToTime(endMinutes),
+  };
 };
 
 const dispatchKeySpecificEvents = (key: string, rawValue: string | null): void => {
@@ -318,6 +353,7 @@ const DEFAULT_ADMIN: User = {
   password: "Admin@2024",
   role: "admin",
   groupId: null,
+  groupIds: [],
   createdAt: new Date().toISOString(),
 };
 
@@ -439,7 +475,24 @@ export const setSharedJsonValue = <T>(key: string, value: T): void => {
 
 // Users CRUD
 export const getUsers = (): User[] => {
-  return readStorage<User[]>(STORAGE_KEYS.USERS, []);
+  const users = readStorage<User[]>(STORAGE_KEYS.USERS, []);
+  let hasNormalizedChanges = false;
+
+  const normalizedUsers = users.map((user) => {
+    const normalized = withNormalizedUserGroups(user);
+    const previousIds = (user.groupIds || []).join("|");
+    const nextIds = normalized.groupIds?.join("|") || "";
+    if (user.groupId !== normalized.groupId || previousIds !== nextIds) {
+      hasNormalizedChanges = true;
+    }
+    return normalized;
+  });
+
+  if (hasNormalizedChanges) {
+    writeStorage(STORAGE_KEYS.USERS, normalizedUsers, false);
+  }
+
+  return normalizedUsers;
 };
 
 export const getUserById = (id: string): User | undefined => {
@@ -452,8 +505,12 @@ export const getUserByEmail = (email: string): User | undefined => {
 
 export const createUser = (user: Omit<User, "id" | "createdAt">): User => {
   const users = getUsers();
-  const newUser: User = {
+  const normalizedInput = withNormalizedUserGroups({
     ...user,
+    groupId: user.groupId ?? null,
+  });
+  const newUser: User = {
+    ...normalizedInput,
     id: generateId(),
     createdAt: new Date().toISOString(),
   };
@@ -466,9 +523,20 @@ export const updateUser = (id: string, data: Partial<User>): User | null => {
   const users = getUsers();
   const index = users.findIndex((u) => u.id === id);
   if (index === -1) return null;
-  users[index] = { ...users[index], ...data };
+
+  const nextUser = withNormalizedUserGroups({
+    ...users[index],
+    ...data,
+  });
+  users[index] = nextUser;
   writeStorage(STORAGE_KEYS.USERS, users);
-  return users[index];
+
+  const session = readStorage<{ user: User; isAuthenticated: boolean } | null>(STORAGE_KEYS.SESSION, null);
+  if (session?.isAuthenticated && session.user.id === id) {
+    writeStorage(STORAGE_KEYS.SESSION, { ...session, user: nextUser });
+  }
+
+  return nextUser;
 };
 
 export const deleteUser = (id: string): boolean => {
@@ -519,15 +587,30 @@ export const deleteGroup = (id: string): boolean => {
 
 // Schedules CRUD
 export const getSchedules = (): ScheduleSlot[] => {
-  return readStorage<ScheduleSlot[]>(STORAGE_KEYS.SCHEDULES, []);
+  const schedules = readStorage<ScheduleSlot[]>(STORAGE_KEYS.SCHEDULES, []);
+  let hasNormalizedChanges = false;
+
+  const normalizedSchedules = schedules.map((slot) => {
+    const normalized = normalizeScheduleSlot(slot);
+    if (normalized.startTime !== slot.startTime || normalized.endTime !== slot.endTime) {
+      hasNormalizedChanges = true;
+    }
+    return normalized;
+  });
+
+  if (hasNormalizedChanges) {
+    writeStorage(STORAGE_KEYS.SCHEDULES, normalizedSchedules, false);
+  }
+
+  return normalizedSchedules;
 };
 
 export const createSchedule = (slot: Omit<ScheduleSlot, "id">): ScheduleSlot => {
   const schedules = getSchedules();
-  const newSlot: ScheduleSlot = {
+  const newSlot = normalizeScheduleSlot({
     ...slot,
     id: generateId(),
-  };
+  });
   schedules.push(newSlot);
   writeStorage(STORAGE_KEYS.SCHEDULES, schedules);
   return newSlot;
@@ -537,7 +620,7 @@ export const updateSchedule = (id: string, data: Partial<ScheduleSlot>): Schedul
   const schedules = getSchedules();
   const index = schedules.findIndex((s) => s.id === id);
   if (index === -1) return null;
-  schedules[index] = { ...schedules[index], ...data };
+  schedules[index] = normalizeScheduleSlot({ ...schedules[index], ...data });
   writeStorage(STORAGE_KEYS.SCHEDULES, schedules);
   return schedules[index];
 };
@@ -598,7 +681,12 @@ export const markAttendance = (
 
 // Session management (in-memory only, not persisted remotely)
 export const getSession = (): { user: User; isAuthenticated: boolean } | null => {
-  return readStorage<{ user: User; isAuthenticated: boolean } | null>(STORAGE_KEYS.SESSION, null);
+  const session = readStorage<{ user: User; isAuthenticated: boolean } | null>(STORAGE_KEYS.SESSION, null);
+  if (!session) return null;
+  return {
+    ...session,
+    user: withNormalizedUserGroups(session.user),
+  };
 };
 
 export const login = (email: string, password: string): User | null => {
@@ -624,6 +712,7 @@ export const register = (email: string, password: string, name: string): User | 
     name,
     role: "client",
     groupId: null,
+    groupIds: [],
   });
 
   writeStorage(STORAGE_KEYS.SESSION, { user, isAuthenticated: true });

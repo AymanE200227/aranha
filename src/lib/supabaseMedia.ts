@@ -34,7 +34,7 @@ export const removeMediaFile = async (path?: string): Promise<void> => {
   if (!path) return;
   const { error } = await supabase.storage.from(MEDIA_BUCKET).remove([path]);
   if (error) {
-    console.warn(`[media] Failed to delete file \"${path}\": ${error.message}`);
+    console.warn(`[media] Failed to delete file "${path}": ${error.message}`);
   }
 };
 

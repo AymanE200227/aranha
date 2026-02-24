@@ -32,7 +32,8 @@ import { format, addDays, startOfWeek } from "date-fns";
 import { fr } from "date-fns/locale";
 import AdminShell from "@/components/admin/AdminShell";
 import { getGroupColorClasses } from "@/lib/groupColors";
-import { SCHEDULE_TIME_SLOTS } from "@/lib/schedule";
+import { parseTimeToMinutes, SCHEDULE_TIME_SLOTS } from "@/lib/schedule";
+import { isUserInGroup } from "@/lib/userGroups";
 
 const dayNames = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 const timeSlots = SCHEDULE_TIME_SLOTS;
@@ -81,8 +82,12 @@ const AdminAttendance = () => {
   };
 
   const getScheduleForDayTime = (day: string, time: string): { slot: ScheduleSlot; group: Group } | null => {
+    const current = parseTimeToMinutes(time);
     const slot = schedules.find(
-      (s) => s.day === day && s.startTime <= time && s.endTime > time
+      (s) =>
+        s.day === day &&
+        parseTimeToMinutes(s.startTime) <= current &&
+        parseTimeToMinutes(s.endTime) > current
     );
     if (!slot) return null;
     const group = groups.find((g) => g.id === slot.groupId);
@@ -103,7 +108,7 @@ const AdminAttendance = () => {
     const schedule = schedules.find(s => s.id === scheduleId);
     if (!schedule) return { present: 0, absent: 0, total: 0, unmarked: 0 };
     
-    const groupClients = users.filter(u => u.role === "client" && u.groupId === schedule.groupId);
+    const groupClients = users.filter((u) => u.role === "client" && isUserInGroup(u, schedule.groupId));
     const sessionAttendance = attendance.filter(
       a => a.scheduleSlotId === scheduleId && a.date === dateStr
     );
@@ -139,9 +144,7 @@ const AdminAttendance = () => {
   const handleMarkAllPresent = () => {
     if (!currentUser || !selectedSession) return;
     
-    const groupClients = users.filter(
-      u => u.role === "client" && u.groupId === selectedSession.group.id
-    );
+    const groupClients = users.filter((u) => u.role === "client" && isUserInGroup(u, selectedSession.group.id));
     
     const dateStr = format(selectedSession.date, "yyyy-MM-dd");
     groupClients.forEach(client => {
@@ -154,9 +157,7 @@ const AdminAttendance = () => {
 
   const getSessionClients = () => {
     if (!selectedSession) return [];
-    return users.filter(
-      u => u.role === "client" && u.groupId === selectedSession.group.id
-    );
+    return users.filter((u) => u.role === "client" && isUserInGroup(u, selectedSession.group.id));
   };
 
   const weekDates = getWeekDates();
@@ -223,7 +224,7 @@ const AdminAttendance = () => {
 
         {/* Schedule Grid - Click to Open Session */}
         <div className="card-elevated p-6 overflow-x-auto">
-          <table className="w-full min-w-[1220px]">
+          <table className="w-full min-w-[2360px]">
             <thead>
               <tr>
                 <th className="p-3 text-left font-display text-foreground min-w-[100px]">
