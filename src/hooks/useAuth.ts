@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { User } from "@/lib/types";
-import { getSession, login as doLogin, logout as doLogout, register as doRegister, initializeStorage } from "@/lib/storage";
+import {
+  bootstrapStorage,
+  getSession,
+  login as doLogin,
+  logout as doLogout,
+  register as doRegister,
+} from "@/lib/storage";
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -9,9 +15,20 @@ export function useAuth() {
 
   // Initialize on mount
   useEffect(() => {
-    initializeStorage();
-    checkSession();
-    setIsLoading(false);
+    let active = true;
+
+    const init = async () => {
+      await bootstrapStorage();
+      if (!active) return;
+      checkSession();
+      setIsLoading(false);
+    };
+
+    void init();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Listen for session changes

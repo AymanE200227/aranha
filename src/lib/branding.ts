@@ -1,11 +1,13 @@
 import {
   getAppConfig,
   getMediaItems,
+  getSharedValue,
+  removeSharedValue,
   saveAppConfig,
+  setSharedValue,
   APP_CONFIG_UPDATED_EVENT,
+  SHARED_ASSET_KEYS,
 } from "@/lib/storage";
-
-const LEGACY_LOGO_KEY = "app_logo";
 
 export const DEFAULT_BRAND_NAME = "ARANHA BJJ";
 export const DEFAULT_FAVICON_URL = "/logo.svg";
@@ -23,7 +25,7 @@ export const getResolvedLogoUrl = (): string | null => {
   const configLogo = getMediaUrlById(config?.logo);
   if (configLogo) return configLogo;
 
-  const legacyLogo = localStorage.getItem(LEGACY_LOGO_KEY);
+  const legacyLogo = getSharedValue(SHARED_ASSET_KEYS.LEGACY_LOGO);
   return legacyLogo || null;
 };
 
@@ -41,13 +43,13 @@ export const getResolvedBrandName = (): string => {
 
 export const setCustomLogoDataUrl = (dataUrl: string): void => {
   saveAppConfig({ logoDataUrl: dataUrl, logo: undefined });
-  localStorage.setItem(LEGACY_LOGO_KEY, dataUrl);
+  setSharedValue(SHARED_ASSET_KEYS.LEGACY_LOGO, dataUrl);
 };
 
 export const clearCustomLogo = (): void => {
   const config = getAppConfig() || {};
   saveAppConfig({ ...config, logo: undefined, logoDataUrl: undefined });
-  localStorage.removeItem(LEGACY_LOGO_KEY);
+  removeSharedValue(SHARED_ASSET_KEYS.LEGACY_LOGO);
 };
 
 export const subscribeBrandingUpdates = (callback: () => void): (() => void) => {

@@ -1,4 +1,9 @@
+import { supabase } from "@/integrations/supabase/client";
 import { User, Group, ScheduleSlot, AttendanceRecord, Album, MediaFile } from "./types";
+
+const REMOTE_TABLE = "app_shared_storage";
+const REMOTE_POLL_INTERVAL_MS = 5000;
+const REMOTE_FLUSH_DEBOUNCE_MS = 250;
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -16,21 +21,287 @@ const STORAGE_KEYS = {
 } as const;
 
 type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
+
+export const SHARED_ASSET_KEYS = {
+  LEGACY_LOGO: "app_logo",
+  HOME_HERO_IMAGE: "home_hero_image",
+  HOME_GALLERY_IMAGES: "home_gallery_images",
+  HOME_COACHES_IMAGES: "home_coaches_images",
+  HOME_LINEAGE_IMAGE: "home_lineage_image",
+  ABOUT_TIMELINE: "about_timeline",
+  ABOUT_GALLERY: "about_gallery",
+  ABOUT_COACHES_IMAGES: "about_coaches_images",
+} as const;
+
+export interface AppConfig {
+  logo?: string;
+  logoDataUrl?: string;
+  favicon?: string;
+  brandName?: string;
+  primaryColor?: string;
+}
+
+export type AppContentMap = Record<string, string>;
+
+export const APP_CONFIG_UPDATED_EVENT = "jj_app_config_updated";
+export const APP_CONTENT_UPDATED_EVENT = "jj_app_content_updated";
+
+const NON_PERSISTED_KEYS = new Set<string>([STORAGE_KEYS.SESSION]);
 const MOJIBAKE_PATTERN = /Ã|Â|â€|â€œ|â€¢|â€™|â€“|â€”|â„¢/;
 
-const readStorage = <T>(key: StorageKey, fallback: T): T => {
+const cache = new Map<string, string>();
+const remoteUpdatedAt = new Map<string, string>();
+const pendingWrites = new Map<string, string | null>();
+
+let bootstrapPromise: Promise<void> | null = null;
+let pollTimer: number | null = null;
+let flushTimer: number | null = null;
+let isFlushing = false;
+let persistEnabled = false;
+
+interface SharedStorageRow {
+  storage_key: string;
+  storage_value: string | null;
+  updated_at: string;
+}
+
+const isBrowser = (): boolean => typeof window !== "undefined";
+
+const isRemoteConfigured = (): boolean => {
+  if (!isBrowser()) return false;
+  if (import.meta.env.MODE === "test") return false;
+  const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
+  return Boolean(import.meta.env.VITE_SUPABASE_URL && supabaseKey);
+};
+
+const dispatchStorageEvent = (key: string): void => {
+  if (!isBrowser()) return;
+  window.dispatchEvent(new StorageEvent("storage", { key }));
+};
+
+const dispatchKeySpecificEvents = (key: string, rawValue: string | null): void => {
+  if (!isBrowser()) return;
+
+  if (key === STORAGE_KEYS.APP_CONFIG) {
+    const config = safeParse<AppConfig | null>(rawValue, null) ?? null;
+    window.dispatchEvent(new CustomEvent(APP_CONFIG_UPDATED_EVENT, { detail: config }));
+  }
+
+  if (key === STORAGE_KEYS.APP_CONTENT) {
+    const content = safeParse<AppContentMap>(rawValue, {});
+    window.dispatchEvent(new CustomEvent(APP_CONTENT_UPDATED_EVENT, { detail: content }));
+  }
+};
+
+const getRawCachedValue = (key: string): string | null => {
+  if (!cache.has(key)) return null;
+  return cache.get(key) ?? null;
+};
+
+const queueRemoteWrite = (key: string, value: string | null): void => {
+  if (!persistEnabled || !isRemoteConfigured() || NON_PERSISTED_KEYS.has(key)) {
+    return;
+  }
+
+  pendingWrites.set(key, value);
+
+  if (flushTimer !== null) {
+    return;
+  }
+
+  flushTimer = window.setTimeout(() => {
+    flushTimer = null;
+    void flushPendingWrites();
+  }, REMOTE_FLUSH_DEBOUNCE_MS);
+};
+
+const setRawCachedValue = (
+  key: string,
+  value: string | null,
+  options: { emit?: boolean; persist?: boolean } = {}
+): void => {
+  const { emit = true, persist = true } = options;
+  const current = getRawCachedValue(key);
+
+  if (current === value) {
+    return;
+  }
+
+  if (value === null) {
+    cache.delete(key);
+  } else {
+    cache.set(key, value);
+  }
+
+  if (persist) {
+    queueRemoteWrite(key, value);
+  }
+
+  if (emit) {
+    dispatchStorageEvent(key);
+    dispatchKeySpecificEvents(key, value);
+  }
+};
+
+const safeParse = <T>(raw: string | null, fallback: T): T => {
+  if (!raw) return fallback;
   try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
     return JSON.parse(raw) as T;
-  } catch (error) {
-    console.warn(`Storage parse failed for "${key}". Resetting key.`, error);
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // Ignore cleanup errors.
-    }
+  } catch {
     return fallback;
+  }
+};
+
+const readStorage = <T>(key: StorageKey | string, fallback: T): T => {
+  const raw = getRawCachedValue(key);
+  if (!raw) return fallback;
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    setRawCachedValue(key, null, { emit: false, persist: true });
+    return fallback;
+  }
+};
+
+const writeStorage = <T>(key: StorageKey | string, value: T, emit = true): void => {
+  setRawCachedValue(key, JSON.stringify(value), { emit, persist: true });
+};
+
+const ensureRemoteTableAvailable = async (): Promise<boolean> => {
+  const { error } = await supabase.from(REMOTE_TABLE).select("storage_key").limit(1);
+  if (error) {
+    console.warn(`[storage] Remote SQL disabled: ${error.message}`);
+    return false;
+  }
+  return true;
+};
+
+const fetchAllRemoteRows = async (): Promise<SharedStorageRow[] | null> => {
+  const { data, error } = await supabase
+    .from(REMOTE_TABLE)
+    .select("storage_key,storage_value,updated_at");
+
+  if (error) {
+    console.warn(`[storage] Failed reading remote SQL rows: ${error.message}`);
+    return null;
+  }
+
+  return (data ?? []) as SharedStorageRow[];
+};
+
+const applyRemoteRows = (rows: SharedStorageRow[], emit: boolean): void => {
+  rows.forEach((row) => {
+    remoteUpdatedAt.set(row.storage_key, row.updated_at);
+    setRawCachedValue(row.storage_key, row.storage_value, { emit, persist: false });
+  });
+};
+
+const flushPendingWrites = async (): Promise<void> => {
+  if (!persistEnabled || isFlushing || pendingWrites.size === 0) {
+    return;
+  }
+
+  isFlushing = true;
+  const writeBatch = Array.from(pendingWrites.entries()).map(([storage_key, storage_value]) => ({
+    storage_key,
+    storage_value,
+  }));
+  pendingWrites.clear();
+
+  const { data, error } = await supabase
+    .from(REMOTE_TABLE)
+    .upsert(writeBatch, { onConflict: "storage_key" })
+    .select("storage_key,updated_at");
+
+  if (error) {
+    console.warn(`[storage] Failed writing to remote SQL: ${error.message}`);
+    writeBatch.forEach(({ storage_key, storage_value }) => {
+      pendingWrites.set(storage_key, storage_value);
+    });
+  } else {
+    ((data ?? []) as Array<Pick<SharedStorageRow, "storage_key" | "updated_at">>).forEach((row) => {
+      remoteUpdatedAt.set(row.storage_key, row.updated_at);
+    });
+  }
+
+  isFlushing = false;
+};
+
+const pollRemoteChanges = async (): Promise<void> => {
+  if (!persistEnabled) return;
+
+  const rows = await fetchAllRemoteRows();
+  if (!rows) return;
+
+  const changedRows = rows.filter((row) => remoteUpdatedAt.get(row.storage_key) !== row.updated_at);
+  if (changedRows.length === 0) {
+    return;
+  }
+
+  applyRemoteRows(changedRows, true);
+};
+
+const startRemotePolling = (): void => {
+  if (!isBrowser() || pollTimer !== null) return;
+
+  pollTimer = window.setInterval(() => {
+    void pollRemoteChanges();
+  }, REMOTE_POLL_INTERVAL_MS);
+};
+
+const stopRemotePolling = (): void => {
+  if (!isBrowser() || pollTimer === null) return;
+  window.clearInterval(pollTimer);
+  pollTimer = null;
+};
+
+const initializeDefaults = (): void => {
+  // Initialize users with admin if not exists
+  const users = readStorage<User[]>(STORAGE_KEYS.USERS, []);
+  const adminExists = users.some((u) => u.email === DEFAULT_ADMIN.email);
+  if (!adminExists) {
+    writeStorage(STORAGE_KEYS.USERS, [...users, DEFAULT_ADMIN], false);
+  }
+
+  // Initialize groups if not exists
+  if (readStorage<Group[]>(STORAGE_KEYS.GROUPS, []).length === 0) {
+    writeStorage(STORAGE_KEYS.GROUPS, DEFAULT_GROUPS, false);
+  }
+
+  // Initialize schedules if not exists
+  if (readStorage<ScheduleSlot[]>(STORAGE_KEYS.SCHEDULES, []).length === 0) {
+    writeStorage(STORAGE_KEYS.SCHEDULES, DEFAULT_SCHEDULES, false);
+  }
+
+  // Initialize attendance if not exists
+  if (getRawCachedValue(STORAGE_KEYS.ATTENDANCE) === null) {
+    writeStorage(STORAGE_KEYS.ATTENDANCE, [], false);
+  }
+
+  // Initialize media-related keys
+  if (getRawCachedValue(STORAGE_KEYS.ALBUMS) === null) {
+    writeStorage(STORAGE_KEYS.ALBUMS, [], false);
+  }
+
+  if (getRawCachedValue(STORAGE_KEYS.MEDIA) === null) {
+    writeStorage(STORAGE_KEYS.MEDIA, [], false);
+  }
+
+  if (getRawCachedValue(STORAGE_KEYS.MEDIA_ITEMS) === null) {
+    writeStorage(STORAGE_KEYS.MEDIA_ITEMS, [], false);
+  }
+
+  if (getRawCachedValue(STORAGE_KEYS.APP_CONFIG) === null) {
+    writeStorage(STORAGE_KEYS.APP_CONFIG, {}, false);
+  }
+
+  if (getRawCachedValue(STORAGE_KEYS.APP_CONTENT) === null) {
+    writeStorage(STORAGE_KEYS.APP_CONTENT, {}, false);
+  }
+
+  if (getRawCachedValue(STORAGE_KEYS.ABOUT_CONTENT) === null) {
+    writeStorage(STORAGE_KEYS.ABOUT_CONTENT, [], false);
   }
 };
 
@@ -86,41 +357,84 @@ const DEFAULT_SCHEDULES: ScheduleSlot[] = [
   { id: "s7", groupId: "group-open", day: "Samedi", startTime: "10:00", endTime: "12:00" },
 ];
 
-// Initialize storage with default data
+// Initialize defaults in memory (sync)
 export const initializeStorage = (): void => {
-  // Validate critical keys to clear invalid JSON before init.
-  readStorage<User[]>(STORAGE_KEYS.USERS, []);
-  readStorage<Group[]>(STORAGE_KEYS.GROUPS, []);
-  readStorage<ScheduleSlot[]>(STORAGE_KEYS.SCHEDULES, []);
-  readStorage<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, []);
+  initializeDefaults();
+};
 
-  // Initialize users with admin if not exists
-  if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([DEFAULT_ADMIN]));
-  } else {
-    // Ensure admin exists
-    const users = readStorage<User[]>(STORAGE_KEYS.USERS, []);
-    const adminExists = users.some((u) => u.email === DEFAULT_ADMIN.email);
-    if (!adminExists) {
-      users.push(DEFAULT_ADMIN);
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+// Hydrate from SQL and start remote sync (async)
+export const bootstrapStorage = async (): Promise<void> => {
+  if (bootstrapPromise) {
+    return bootstrapPromise;
+  }
+
+  bootstrapPromise = (async () => {
+    initializeDefaults();
+
+    if (!isRemoteConfigured()) {
+      persistEnabled = false;
+      return;
     }
-  }
 
-  // Initialize groups if not exists
-  if (!localStorage.getItem(STORAGE_KEYS.GROUPS)) {
-    localStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(DEFAULT_GROUPS));
-  }
+    const tableReady = await ensureRemoteTableAvailable();
+    if (!tableReady) {
+      persistEnabled = false;
+      return;
+    }
 
-  // Initialize schedules if not exists
-  if (!localStorage.getItem(STORAGE_KEYS.SCHEDULES)) {
-    localStorage.setItem(STORAGE_KEYS.SCHEDULES, JSON.stringify(DEFAULT_SCHEDULES));
-  }
+    const rows = await fetchAllRemoteRows();
+    if (rows) {
+      applyRemoteRows(rows, false);
+    }
 
-  // Initialize attendance if not exists
-  if (!localStorage.getItem(STORAGE_KEYS.ATTENDANCE)) {
-    localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify([]));
+    persistEnabled = true;
+    initializeDefaults();
+    await flushPendingWrites();
+    startRemotePolling();
+  })();
+
+  return bootstrapPromise;
+};
+
+export const shutdownStorageSync = (): void => {
+  stopRemotePolling();
+  if (flushTimer !== null) {
+    window.clearTimeout(flushTimer);
+    flushTimer = null;
   }
+};
+
+export const __resetStorageForTests = (): void => {
+  stopRemotePolling();
+  if (flushTimer !== null) {
+    window.clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  cache.clear();
+  remoteUpdatedAt.clear();
+  pendingWrites.clear();
+  bootstrapPromise = null;
+  persistEnabled = false;
+};
+
+export const getSharedValue = (key: string): string | null => {
+  return getRawCachedValue(key);
+};
+
+export const setSharedValue = (key: string, value: string): void => {
+  setRawCachedValue(key, value, { emit: true, persist: true });
+};
+
+export const removeSharedValue = (key: string): void => {
+  setRawCachedValue(key, null, { emit: true, persist: true });
+};
+
+export const getSharedJsonValue = <T>(key: string, fallback: T): T => {
+  return safeParse<T>(getRawCachedValue(key), fallback);
+};
+
+export const setSharedJsonValue = <T>(key: string, value: T): void => {
+  setSharedValue(key, JSON.stringify(value));
 };
 
 // Users CRUD
@@ -144,7 +458,7 @@ export const createUser = (user: Omit<User, "id" | "createdAt">): User => {
     createdAt: new Date().toISOString(),
   };
   users.push(newUser);
-  localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+  writeStorage(STORAGE_KEYS.USERS, users);
   return newUser;
 };
 
@@ -153,7 +467,7 @@ export const updateUser = (id: string, data: Partial<User>): User | null => {
   const index = users.findIndex((u) => u.id === id);
   if (index === -1) return null;
   users[index] = { ...users[index], ...data };
-  localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+  writeStorage(STORAGE_KEYS.USERS, users);
   return users[index];
 };
 
@@ -161,7 +475,7 @@ export const deleteUser = (id: string): boolean => {
   const users = getUsers();
   const filtered = users.filter((u) => u.id !== id);
   if (filtered.length === users.length) return false;
-  localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(filtered));
+  writeStorage(STORAGE_KEYS.USERS, filtered);
   return true;
 };
 
@@ -182,7 +496,7 @@ export const createGroup = (group: Omit<Group, "id" | "createdAt">): Group => {
     createdAt: new Date().toISOString(),
   };
   groups.push(newGroup);
-  localStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(groups));
+  writeStorage(STORAGE_KEYS.GROUPS, groups);
   return newGroup;
 };
 
@@ -191,7 +505,7 @@ export const updateGroup = (id: string, data: Partial<Group>): Group | null => {
   const index = groups.findIndex((g) => g.id === id);
   if (index === -1) return null;
   groups[index] = { ...groups[index], ...data };
-  localStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(groups));
+  writeStorage(STORAGE_KEYS.GROUPS, groups);
   return groups[index];
 };
 
@@ -199,7 +513,7 @@ export const deleteGroup = (id: string): boolean => {
   const groups = getGroups();
   const filtered = groups.filter((g) => g.id !== id);
   if (filtered.length === groups.length) return false;
-  localStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(filtered));
+  writeStorage(STORAGE_KEYS.GROUPS, filtered);
   return true;
 };
 
@@ -215,7 +529,7 @@ export const createSchedule = (slot: Omit<ScheduleSlot, "id">): ScheduleSlot => 
     id: generateId(),
   };
   schedules.push(newSlot);
-  localStorage.setItem(STORAGE_KEYS.SCHEDULES, JSON.stringify(schedules));
+  writeStorage(STORAGE_KEYS.SCHEDULES, schedules);
   return newSlot;
 };
 
@@ -224,7 +538,7 @@ export const updateSchedule = (id: string, data: Partial<ScheduleSlot>): Schedul
   const index = schedules.findIndex((s) => s.id === id);
   if (index === -1) return null;
   schedules[index] = { ...schedules[index], ...data };
-  localStorage.setItem(STORAGE_KEYS.SCHEDULES, JSON.stringify(schedules));
+  writeStorage(STORAGE_KEYS.SCHEDULES, schedules);
   return schedules[index];
 };
 
@@ -232,7 +546,7 @@ export const deleteSchedule = (id: string): boolean => {
   const schedules = getSchedules();
   const filtered = schedules.filter((s) => s.id !== id);
   if (filtered.length === schedules.length) return false;
-  localStorage.setItem(STORAGE_KEYS.SCHEDULES, JSON.stringify(filtered));
+  writeStorage(STORAGE_KEYS.SCHEDULES, filtered);
   return true;
 };
 
@@ -257,8 +571,7 @@ export const markAttendance = (
   markedBy: string
 ): AttendanceRecord => {
   const attendance = getAttendance();
-  
-  // Check if already marked for this date/slot
+
   const existingIndex = attendance.findIndex(
     (a) => a.userId === userId && a.scheduleSlotId === scheduleSlotId && a.date === date
   );
@@ -279,11 +592,11 @@ export const markAttendance = (
     attendance.push(record);
   }
 
-  localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(attendance));
+  writeStorage(STORAGE_KEYS.ATTENDANCE, attendance);
   return record;
 };
 
-// Session management
+// Session management (in-memory only, not persisted remotely)
 export const getSession = (): { user: User; isAuthenticated: boolean } | null => {
   return readStorage<{ user: User; isAuthenticated: boolean } | null>(STORAGE_KEYS.SESSION, null);
 };
@@ -291,22 +604,20 @@ export const getSession = (): { user: User; isAuthenticated: boolean } | null =>
 export const login = (email: string, password: string): User | null => {
   const user = getUserByEmail(email);
   if (user && user.password === password) {
-    localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify({ user, isAuthenticated: true }));
-    window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEYS.SESSION }));
+    writeStorage(STORAGE_KEYS.SESSION, { user, isAuthenticated: true });
     return user;
   }
   return null;
 };
 
 export const logout = (): void => {
-  localStorage.removeItem(STORAGE_KEYS.SESSION);
-  window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEYS.SESSION }));
+  setRawCachedValue(STORAGE_KEYS.SESSION, null, { emit: true, persist: false });
 };
 
 export const register = (email: string, password: string, name: string): User | null => {
   const existing = getUserByEmail(email);
   if (existing) return null;
-  
+
   const user = createUser({
     email,
     password,
@@ -314,11 +625,11 @@ export const register = (email: string, password: string, name: string): User | 
     role: "client",
     groupId: null,
   });
-  
-  localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify({ user, isAuthenticated: true }));
-  window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEYS.SESSION }));
+
+  writeStorage(STORAGE_KEYS.SESSION, { user, isAuthenticated: true });
   return user;
 };
+
 // Gallery CRUD - Albums
 export const getAlbums = (): Album[] => {
   return readStorage<Album[]>(STORAGE_KEYS.ALBUMS, []);
@@ -338,7 +649,7 @@ export const createAlbum = (album: Omit<Album, "id" | "createdAt" | "updatedAt" 
     updatedAt: new Date().toISOString(),
   };
   albums.push(newAlbum);
-  localStorage.setItem(STORAGE_KEYS.ALBUMS, JSON.stringify(albums));
+  writeStorage(STORAGE_KEYS.ALBUMS, albums);
   return newAlbum;
 };
 
@@ -347,7 +658,7 @@ export const updateAlbum = (id: string, data: Partial<Album>): Album | null => {
   const index = albums.findIndex((a) => a.id === id);
   if (index === -1) return null;
   albums[index] = { ...albums[index], ...data, updatedAt: new Date().toISOString() };
-  localStorage.setItem(STORAGE_KEYS.ALBUMS, JSON.stringify(albums));
+  writeStorage(STORAGE_KEYS.ALBUMS, albums);
   return albums[index];
 };
 
@@ -355,13 +666,12 @@ export const deleteAlbum = (id: string): boolean => {
   const albums = getAlbums();
   const filtered = albums.filter((a) => a.id !== id);
   if (filtered.length === albums.length) return false;
-  
-  // Also delete all media files in this album
+
   const media = getMedia();
   const filteredMedia = media.filter((m) => m.albumId !== id);
-  localStorage.setItem(STORAGE_KEYS.MEDIA, JSON.stringify(filteredMedia));
-  
-  localStorage.setItem(STORAGE_KEYS.ALBUMS, JSON.stringify(filtered));
+  writeStorage(STORAGE_KEYS.MEDIA, filteredMedia);
+
+  writeStorage(STORAGE_KEYS.ALBUMS, filtered);
   return true;
 };
 
@@ -383,9 +693,8 @@ export const createMediaFile = (media: Omit<MediaFile, "id" | "createdAt" | "upd
     updatedAt: new Date().toISOString(),
   };
   allMedia.push(newMedia);
-  localStorage.setItem(STORAGE_KEYS.MEDIA, JSON.stringify(allMedia));
-  
-  // Update album's media count and thumbnail
+  writeStorage(STORAGE_KEYS.MEDIA, allMedia);
+
   const album = getAlbumById(media.albumId);
   if (album) {
     const albumMedia = getMediaByAlbumId(media.albumId);
@@ -394,7 +703,7 @@ export const createMediaFile = (media: Omit<MediaFile, "id" | "createdAt" | "upd
       thumbnail: newMedia.type === "image" ? newMedia.url : newMedia.thumbnail,
     });
   }
-  
+
   return newMedia;
 };
 
@@ -403,7 +712,7 @@ export const updateMediaFile = (id: string, data: Partial<MediaFile>): MediaFile
   const index = allMedia.findIndex((m) => m.id === id);
   if (index === -1) return null;
   allMedia[index] = { ...allMedia[index], ...data, updatedAt: new Date().toISOString() };
-  localStorage.setItem(STORAGE_KEYS.MEDIA, JSON.stringify(allMedia));
+  writeStorage(STORAGE_KEYS.MEDIA, allMedia);
   return allMedia[index];
 };
 
@@ -411,11 +720,10 @@ export const deleteMediaFile = (id: string): boolean => {
   const allMedia = getMedia();
   const media = allMedia.find((m) => m.id === id);
   if (!media) return false;
-  
+
   const filtered = allMedia.filter((m) => m.id !== id);
-  localStorage.setItem(STORAGE_KEYS.MEDIA, JSON.stringify(filtered));
-  
-  // Update album's media count
+  writeStorage(STORAGE_KEYS.MEDIA, filtered);
+
   const album = getAlbumById(media.albumId);
   if (album) {
     const albumMedia = getMediaByAlbumId(media.albumId);
@@ -423,7 +731,7 @@ export const deleteMediaFile = (id: string): boolean => {
       mediaCount: Math.max(0, albumMedia.length - 1),
     });
   }
-  
+
   return true;
 };
 
@@ -444,7 +752,7 @@ export const getMediaItems = (): MediaItem[] => {
 };
 
 export const saveMedia = (items: MediaItem[]): void => {
-  localStorage.setItem(STORAGE_KEYS.MEDIA_ITEMS, JSON.stringify(items));
+  writeStorage(STORAGE_KEYS.MEDIA_ITEMS, items);
 };
 
 export const deleteMedia = (id: string): boolean => {
@@ -456,17 +764,6 @@ export const deleteMedia = (id: string): boolean => {
 };
 
 // App Config Management
-export interface AppConfig {
-  logo?: string;
-  logoDataUrl?: string;
-  favicon?: string;
-  brandName?: string;
-  primaryColor?: string;
-}
-
-export const APP_CONFIG_UPDATED_EVENT = "jj_app_config_updated";
-export const APP_CONTENT_UPDATED_EVENT = "jj_app_content_updated";
-
 export const getAppConfig = (): AppConfig | null => {
   return readStorage<AppConfig | null>(STORAGE_KEYS.APP_CONFIG, null);
 };
@@ -474,11 +771,8 @@ export const getAppConfig = (): AppConfig | null => {
 export const saveAppConfig = (config: AppConfig): void => {
   const existing = getAppConfig() || {};
   const nextConfig = { ...existing, ...config };
-  localStorage.setItem(STORAGE_KEYS.APP_CONFIG, JSON.stringify(nextConfig));
-  window.dispatchEvent(new CustomEvent(APP_CONFIG_UPDATED_EVENT, { detail: nextConfig }));
+  writeStorage(STORAGE_KEYS.APP_CONFIG, nextConfig);
 };
-
-export type AppContentMap = Record<string, string>;
 
 export const getAppContent = (): AppContentMap => {
   const parsed = readStorage<Record<string, unknown>>(STORAGE_KEYS.APP_CONTENT, {});
@@ -491,8 +785,7 @@ export const getAppContent = (): AppContentMap => {
 };
 
 export const saveAppContent = (content: AppContentMap): void => {
-  localStorage.setItem(STORAGE_KEYS.APP_CONTENT, JSON.stringify(content));
-  window.dispatchEvent(new CustomEvent(APP_CONTENT_UPDATED_EVENT, { detail: content }));
+  writeStorage(STORAGE_KEYS.APP_CONTENT, content);
 };
 
 // About Content Management
@@ -511,7 +804,7 @@ export const getAboutContent = (): AboutImage[] => {
 };
 
 export const saveAboutContent = (items: AboutImage[]): void => {
-  localStorage.setItem(STORAGE_KEYS.ABOUT_CONTENT, JSON.stringify(items));
+  writeStorage(STORAGE_KEYS.ABOUT_CONTENT, items);
 };
 
 export const deleteAboutItem = (id: string): boolean => {

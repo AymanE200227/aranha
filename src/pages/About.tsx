@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import { getSharedJsonValue, setSharedJsonValue, SHARED_ASSET_KEYS } from "@/lib/storage";
 import coach1Image from "@/assets/coach-1.jpg";
 import coach2Image from "@/assets/coach-2.jpg";
 import lineageBanner from "@/assets/lineage-banner.jpg";
@@ -123,12 +124,9 @@ const About = () => {
 
   useEffect(() => {
     window.scrollTo(0, 0);
-    
-    // Load saved coach images
-    const savedCoaches = localStorage.getItem("about_coaches_images");
-    if (savedCoaches) {
-      setCoachImages(JSON.parse(savedCoaches));
-    }
+    setCoachImages(
+      getSharedJsonValue<string[]>(SHARED_ASSET_KEYS.ABOUT_COACHES_IMAGES, [coach1Image, coach2Image])
+    );
     
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -145,9 +143,27 @@ const About = () => {
       observer.observe(sectionRef.current);
     }
 
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === SHARED_ASSET_KEYS.ABOUT_TIMELINE) {
+        setTimeline(getSharedJsonValue<TimelineItem[]>(SHARED_ASSET_KEYS.ABOUT_TIMELINE, defaultTimelineRef.current));
+      }
+
+      if (event.key === SHARED_ASSET_KEYS.ABOUT_GALLERY) {
+        setGallery(getSharedJsonValue<GalleryImage[]>(SHARED_ASSET_KEYS.ABOUT_GALLERY, defaultGalleryRef.current));
+      }
+
+      if (event.key === SHARED_ASSET_KEYS.ABOUT_COACHES_IMAGES) {
+        setCoachImages(
+          getSharedJsonValue<string[]>(SHARED_ASSET_KEYS.ABOUT_COACHES_IMAGES, [coach1Image, coach2Image])
+        );
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
     window.addEventListener("scroll", handleScroll);
     return () => {
       observer.disconnect();
+      window.removeEventListener("storage", handleStorageChange);
       window.removeEventListener("scroll", handleScroll);
     };
   }, []);
@@ -171,13 +187,10 @@ const About = () => {
     },
   ];
 
-  // Load data from localStorage or use defaults
+  // Load data from shared SQL cache or use defaults
   useEffect(() => {
-    const savedTimeline = localStorage.getItem("about_timeline");
-    const savedGallery = localStorage.getItem("about_gallery");
-    
-    setTimeline(savedTimeline ? JSON.parse(savedTimeline) : defaultTimelineRef.current);
-    setGallery(savedGallery ? JSON.parse(savedGallery) : defaultGalleryRef.current);
+    setTimeline(getSharedJsonValue<TimelineItem[]>(SHARED_ASSET_KEYS.ABOUT_TIMELINE, defaultTimelineRef.current));
+    setGallery(getSharedJsonValue<GalleryImage[]>(SHARED_ASSET_KEYS.ABOUT_GALLERY, defaultGalleryRef.current));
   }, []);
 
   // Handle image upload to Base64
@@ -199,7 +212,7 @@ const About = () => {
     
     const updated = timeline.map(t => t.id === item.id ? item : t);
     setTimeline(updated);
-    localStorage.setItem("about_timeline", JSON.stringify(updated));
+    setSharedJsonValue<TimelineItem[]>(SHARED_ASSET_KEYS.ABOUT_TIMELINE, updated);
     setEditDialogOpen(false);
     setEditingItem(null);
   };
@@ -208,7 +221,7 @@ const About = () => {
   const handleDeleteTimelineItem = (id: string) => {
     const updated = timeline.filter(t => t.id !== id);
     setTimeline(updated);
-    localStorage.setItem("about_timeline", JSON.stringify(updated));
+    setSharedJsonValue<TimelineItem[]>(SHARED_ASSET_KEYS.ABOUT_TIMELINE, updated);
   };
 
   // Handle gallery image edit
@@ -217,14 +230,14 @@ const About = () => {
     const base64 = await handleImageUpload(file);
     const updated = gallery.map(g => g.id === id ? { ...g, image: base64 } : g);
     setGallery(updated);
-    localStorage.setItem("about_gallery", JSON.stringify(updated));
+    setSharedJsonValue<GalleryImage[]>(SHARED_ASSET_KEYS.ABOUT_GALLERY, updated);
   };
 
   // Handle gallery image delete
   const handleDeleteGalleryItem = (id: string) => {
     const updated = gallery.filter(g => g.id !== id);
     setGallery(updated);
-    localStorage.setItem("about_gallery", JSON.stringify(updated));
+    setSharedJsonValue<GalleryImage[]>(SHARED_ASSET_KEYS.ABOUT_GALLERY, updated);
   };
 
   // Handle add new timeline item
@@ -241,7 +254,7 @@ const About = () => {
 
     const updated = [...timeline, item];
     setTimeline(updated);
-    localStorage.setItem("about_timeline", JSON.stringify(updated));
+    setSharedJsonValue<TimelineItem[]>(SHARED_ASSET_KEYS.ABOUT_TIMELINE, updated);
     
     setNewTimelineItem({ id: "", year: "", title: "", description: "", image: "" });
     setAddTimelineDialogOpen(false);
@@ -258,7 +271,7 @@ const About = () => {
 
     const updated = [...gallery, newGallery];
     setGallery(updated);
-    localStorage.setItem("about_gallery", JSON.stringify(updated));
+    setSharedJsonValue<GalleryImage[]>(SHARED_ASSET_KEYS.ABOUT_GALLERY, updated);
   };
 
   const philosophy = [
@@ -366,7 +379,7 @@ const About = () => {
                                 const updated = [...coachImages];
                                 updated[index] = base64;
                                 setCoachImages(updated);
-                                localStorage.setItem("about_coaches_images", JSON.stringify(updated));
+                                setSharedJsonValue<string[]>(SHARED_ASSET_KEYS.ABOUT_COACHES_IMAGES, updated);
                               };
                               reader.readAsDataURL(e.target.files[0]);
                             }

@@ -13,6 +13,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  __resetStorageForTests,
   initializeStorage,
   generateId,
   getUsers,
@@ -50,7 +51,7 @@ import { User, Group, ScheduleSlot } from "@/lib/types";
  */
 describe("Storage Initialization", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
   });
 
   it("should initialize storage with default data", () => {
@@ -91,7 +92,7 @@ describe("Storage Initialization", () => {
  */
 describe("User Management", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
     initializeStorage();
   });
 
@@ -225,7 +226,7 @@ describe("User Management", () => {
  */
 describe("Group Management", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
     initializeStorage();
   });
 
@@ -295,7 +296,7 @@ describe("Schedule Management", () => {
   let groupId: string;
 
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
     initializeStorage();
     const groups = getGroups();
     groupId = groups[0].id;
@@ -373,7 +374,7 @@ describe("Attendance Management", () => {
   let scheduleSlotId: string;
 
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
     initializeStorage();
     const users = getUsers().filter((u) => u.role === "client");
     if (users.length === 0) {
@@ -429,7 +430,7 @@ describe("Attendance Management", () => {
  */
 describe("Media Management", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
   });
 
   it("should save media items", () => {
@@ -526,7 +527,7 @@ describe("Media Management", () => {
  */
 describe("App Configuration", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
   });
 
   it("should save app config", () => {
@@ -573,7 +574,7 @@ describe("App Configuration", () => {
  */
 describe("About Content Management", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
   });
 
   it("should save about content", () => {
@@ -669,7 +670,7 @@ describe("About Content Management", () => {
  */
 describe("Session Management", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
     initializeStorage();
   });
 
@@ -698,7 +699,7 @@ describe("Session Management", () => {
  */
 describe("Integration Tests", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
     initializeStorage();
   });
 
@@ -788,7 +789,7 @@ describe("Integration Tests", () => {
  */
 describe("Error Handling", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
     initializeStorage();
   });
 
@@ -833,7 +834,7 @@ describe("Error Handling", () => {
  */
 describe("Data Persistence", () => {
   it("should persist data across instances", () => {
-    localStorage.clear();
+    __resetStorageForTests();
     initializeStorage();
 
     const user = createUser({
@@ -849,7 +850,7 @@ describe("Data Persistence", () => {
   });
 
   it("should maintain data integrity after multiple operations", () => {
-    localStorage.clear();
+    __resetStorageForTests();
     initializeStorage();
 
     const initialCount = getUsers().length;
@@ -874,3 +875,4 @@ describe("Data Persistence", () => {
     expect(finalCount).toBe(initialCount + 2);
   });
 });
+

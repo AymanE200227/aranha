@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { getAlbums, createAlbum, updateAlbum, deleteAlbum, getMediaByAlbumId, createMediaFile, deleteMediaFile } from "@/lib/storage";
-import { initializeIndexedDB, storeMediaBlobInIndexedDB, getMediaBlobUrl, deleteMediaFromIndexedDB, deleteAlbumMediaFromIndexedDB, getIndexedDBUsage } from "@/lib/indexeddb";
+import { removeMediaFile, uploadMediaFile, getStoragePathFromPublicUrl } from "@/lib/supabaseMedia";
 import { Album, MediaFile } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Edit, Image as ImageIcon, Video, X, ChevronLeft, Play, Upload, HardDrive } from "lucide-react";
+import { Plus, Trash2, Edit, Image as ImageIcon, Video, X, ChevronLeft, Play, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 const Gallery = () => {
@@ -39,56 +39,6 @@ const Gallery = () => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [selectedMedia, setSelectedMedia] = useState<MediaFile | null>(null);
   const [showMediaViewer, setShowMediaViewer] = useState(false);
-  const [storageUsage, setStorageUsage] = useState<{ used: number; available: number }>({ used: 0, available: 0 });
-  const [resolvedMediaUrls, setResolvedMediaUrls] = useState<Record<string, string>>({}); // For IndexedDB URLs
-
-  // Resolve IndexedDB URLs when media loads
-  useEffect(() => {
-    const resolveIndexedDBUrls = async () => {
-      const urlMap: Record<string, string> = {};
-      
-      for (const mediaItem of media) {
-        if (mediaItem.url.startsWith("indexeddb://")) {
-          const idbId = mediaItem.url.replace("indexeddb://", "");
-          const blobUrl = await getMediaBlobUrl(idbId);
-          if (blobUrl) {
-            urlMap[mediaItem.id] = blobUrl;
-          }
-        }
-        
-        if (mediaItem.thumbnail?.startsWith("indexeddb://")) {
-          const thumbId = mediaItem.thumbnail.replace("indexeddb://", "");
-          const blobUrl = await getMediaBlobUrl(thumbId);
-          if (blobUrl) {
-            urlMap[`${mediaItem.id}_thumb`] = blobUrl;
-          }
-        }
-      }
-      
-      if (Object.keys(urlMap).length > 0) {
-        setResolvedMediaUrls(urlMap);
-      }
-    };
-    
-    if (media.length > 0) {
-      resolveIndexedDBUrls();
-    }
-  }, [media]);
-
-  // Helper to get the actual URL for display
-  const getMediaDisplayUrl = (mediaItem: MediaFile): string => {
-    if (mediaItem.url.startsWith("indexeddb://")) {
-      return resolvedMediaUrls[mediaItem.id] || "";
-    }
-    return mediaItem.url;
-  };
-
-  const getMediaThumbnailUrl = (mediaItem: MediaFile): string | undefined => {
-    if (mediaItem.thumbnail?.startsWith("indexeddb://")) {
-      return resolvedMediaUrls[`${mediaItem.id}_thumb`];
-    }
-    return mediaItem.thumbnail;
-  };
 
   // File size limits
   const FILE_SIZES = {
@@ -96,38 +46,32 @@ const Gallery = () => {
     video: 100 * 1024 * 1024, // 100MB
   };
 
+  const getMediaDisplayUrl = (mediaItem: MediaFile): string => mediaItem.url;
+  const getMediaThumbnailUrl = (mediaItem: MediaFile): string | undefined => mediaItem.thumbnail;
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       navigate("/auth");
       return;
     }
-    
-    // Initialize IndexedDB and load data
-    const initDB = async () => {
-      try {
-        await initializeIndexedDB();
-        loadAlbums();
-        updateStorageInfo();
-      } catch (error) {
-        console.error("Failed to initialize IndexedDB:", error);
-        toast.error("Erreur lors de l'initialisation de la base de données");
-      }
-    };
-    
-    initDB();
+
+    loadAlbums();
   }, [isAuthenticated, isLoading, navigate]);
 
-  const updateStorageInfo = async () => {
-    try {
-      const usage = await getIndexedDBUsage();
-      setStorageUsage({
-        used: usage.usage,
-        available: usage.quota,
-      });
-    } catch (error) {
-      console.error("Failed to get storage info:", error);
-    }
-  };
+  useEffect(() => {
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === "jj_albums") {
+        loadAlbums();
+      }
+
+      if (event.key === "jj_media" && selectedAlbum) {
+        setMedia(getMediaByAlbumId(selectedAlbum.id));
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [selectedAlbum]);
 
   const loadAlbums = () => {
     const allAlbums = getAlbums();
@@ -191,7 +135,7 @@ const Gallery = () => {
 
       // For videos, only get duration and show placeholder
       if (newMediaType === "video") {
-        // Create a blob URL for video preview (doesn't use localStorage)
+        // Create a temporary blob URL for local preview.
         const blobUrl = URL.createObjectURL(file);
         setMediaPreview(blobUrl);
         toast.success("Vidéo sélectionnée. Une miniature est recommandée.");
@@ -286,14 +230,11 @@ const Gallery = () => {
   const handleDeleteAlbum = (albumId: string) => {
     if (confirm("Êtes-vous sûr de vouloir supprimer cet album et tous ses médias ?")) {
       if (deleteAlbum(albumId)) {
-        // Also delete all media from IndexedDB
-        deleteAlbumMediaFromIndexedDB(albumId).catch(console.error);
         
         setAlbums(albums.filter((a) => a.id !== albumId));
         if (selectedAlbum?.id === albumId) {
           setSelectedAlbum(null);
         }
-        updateStorageInfo();
         toast.success("Album supprimé");
       }
     }
@@ -329,64 +270,43 @@ const Gallery = () => {
 
       let finalUrl = newMediaUrl;
       let finalThumbnail = newMediaThumbnail;
+      let storagePath: string | undefined;
+      let thumbnailStoragePath: string | undefined;
       const mediaId = generateId();
 
-      // If file is selected, store it in IndexedDB
       if (newMediaFile) {
         try {
-          // Show progress
-          setUploadProgress(50);
-          
-          // Store the blob in IndexedDB instead of base64
-          await storeMediaBlobInIndexedDB(
-            mediaId,
-            selectedAlbum.id,
-            newMediaType,
-            newMediaFile,
-            newMediaTitle,
-            newMediaDesc,
-            newMediaFile.type
-          );
-
-          // Use a special prefix to indicate IndexedDB storage
-          finalUrl = `indexeddb://${mediaId}`;
-          
-          setUploadProgress(75);
+          setUploadProgress(40);
+          const uploaded = await uploadMediaFile(newMediaFile, selectedAlbum.id, mediaId);
+          finalUrl = uploaded.publicUrl;
+          storagePath = uploaded.path;
+          setUploadProgress(70);
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : "Unknown error";
-          toast.error("Erreur IndexedDB: " + errorMsg);
+          toast.error("Erreur upload Supabase: " + errorMsg);
           setIsUploading(false);
           setUploadProgress(0);
           return;
         }
       }
 
-      // Store thumbnail if provided
       if (newMediaThumbnailFile) {
         try {
-          const thumbId = `thumb_${mediaId}`;
-          await storeMediaBlobInIndexedDB(
-            thumbId,
-            selectedAlbum.id,
-            "image",
-            newMediaThumbnailFile,
-            `${newMediaTitle} - Thumbnail`,
-            newMediaDesc,
-            newMediaThumbnailFile.type
-          );
-          finalThumbnail = `indexeddb://${thumbId}`;
+          const uploadedThumb = await uploadMediaFile(newMediaThumbnailFile, selectedAlbum.id, `thumb-${mediaId}`);
+          finalThumbnail = uploadedThumb.publicUrl;
+          thumbnailStoragePath = uploadedThumb.path;
         } catch (error) {
-          console.warn("Failed to store thumbnail:", error);
-          // Don't fail the entire operation if thumbnail fails
+          console.warn("Failed to upload thumbnail:", error);
         }
       }
 
-      // Create metadata record in localStorage
       const mediaFile = createMediaFile({
         albumId: selectedAlbum.id,
         type: newMediaType,
         url: finalUrl,
+        storagePath,
         thumbnail: finalThumbnail,
+        thumbnailStoragePath,
         title: newMediaTitle,
         description: newMediaDesc,
         size: newMediaFile ? newMediaFile.size : 0,
@@ -397,7 +317,6 @@ const Gallery = () => {
       setShowAddMediaDialog(false);
       setIsUploading(false);
       setUploadProgress(0);
-      updateStorageInfo();
       toast.success("Média ajouté avec succès");
     } catch (error) {
       setIsUploading(false);
@@ -428,30 +347,21 @@ const Gallery = () => {
   const handleDeleteMedia = async (mediaId: string) => {
     if (confirm("Êtes-vous sûr de vouloir supprimer ce média ?")) {
       const mediaItem = media.find((m) => m.id === mediaId);
-      
+
+      if (mediaItem?.storagePath) {
+        await removeMediaFile(mediaItem.storagePath);
+      } else {
+        await removeMediaFile(getStoragePathFromPublicUrl(mediaItem?.url) || undefined);
+      }
+
+      if (mediaItem?.thumbnailStoragePath) {
+        await removeMediaFile(mediaItem.thumbnailStoragePath);
+      } else {
+        await removeMediaFile(getStoragePathFromPublicUrl(mediaItem?.thumbnail) || undefined);
+      }
+
       if (deleteMediaFile(mediaId)) {
-        // Also delete from IndexedDB if stored there
-        if (mediaItem?.url.startsWith("indexeddb://")) {
-          const idbId = mediaItem.url.replace("indexeddb://", "");
-          try {
-            await deleteMediaFromIndexedDB(idbId);
-          } catch (error) {
-            console.error("Failed to delete from IndexedDB:", error);
-          }
-        }
-        
-        // Delete thumbnail from IndexedDB if exists
-        if (mediaItem?.thumbnail?.startsWith("indexeddb://")) {
-          const thumbId = mediaItem.thumbnail.replace("indexeddb://", "");
-          try {
-            await deleteMediaFromIndexedDB(thumbId);
-          } catch (error) {
-            console.error("Failed to delete thumbnail from IndexedDB:", error);
-          }
-        }
-        
         setMedia(media.filter((m) => m.id !== mediaId));
-        updateStorageInfo();
         toast.success("Média supprimé");
       }
     }
@@ -988,36 +898,6 @@ const Gallery = () => {
                 </Dialog>
               </div>
 
-              {/* Storage Info */}
-              {storageUsage.available > 0 && (
-                <div className="mb-6 p-4 rounded-lg bg-secondary/30 border border-border/50">
-                  <div className="flex items-center gap-3 mb-3">
-                    <HardDrive className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-medium text-foreground">Espace de stockage</span>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground">
-                        {(storageUsage.used / (1024 * 1024)).toFixed(1)} MB / {(storageUsage.available / (1024 * 1024)).toFixed(0)} MB
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {Math.round((storageUsage.used / storageUsage.available) * 100)}%
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden border border-border/30">
-                      <div
-                        className={`h-full transition-all ${
-                          storageUsage.used / storageUsage.available > 0.8
-                            ? "bg-destructive"
-                            : "bg-gradient-to-r from-primary to-accent"
-                        }`}
-                        style={{ width: `${Math.round((storageUsage.used / storageUsage.available) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* Media Grid */}
               {media.length === 0 ? (
                 <div className="pt-12 text-center">
@@ -1159,3 +1039,10 @@ const Gallery = () => {
 };
 
 export default Gallery;
+
+
+
+
+
+
+

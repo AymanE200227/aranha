@@ -98,7 +98,9 @@ export interface MediaFile {
   albumId: string;
   type: "image" | "video";
   url: string;
+  storagePath?: string;
   thumbnail?: string;
+  thumbnailStoragePath?: string;
   title: string;
   description: string;
   size: number;

@@ -1,19 +1,21 @@
-# Supabase Shared Sync Setup (Required for Netlify)
+# Supabase SQL + Storage Setup (Required for Netlify)
 
-Your Netlify site is static, so it cannot create database tables by itself.
-You must run the SQL migration one time in Supabase.
+This frontend now uses:
+- Supabase SQL table `public.app_shared_storage` for application data.
+- Supabase Storage bucket `aranha-media` for uploaded media files.
 
-## 1) Run SQL migration
+Because Netlify deploys static frontend only, you must apply SQL migrations in Supabase once.
+
+## 1) Run both SQL migrations
 
 Open Supabase Dashboard:
 - Project: `krimqarinirxmjnpktlj`
 - Go to: `SQL Editor`
-- Run the full SQL from:
+- Run SQL from:
   - `supabase/migrations/20260223100000_create_app_shared_storage.sql`
+  - `supabase/migrations/20260224110000_create_media_bucket.sql`
 
-## 2) Verify table exists
-
-Run this query in SQL Editor:
+## 2) Verify SQL table
 
 ```sql
 select storage_key, updated_at
@@ -22,17 +24,24 @@ order by updated_at desc
 limit 10;
 ```
 
-It should return an empty table (or rows if already synced), with no error.
+Expected: query succeeds (empty or populated rows).
 
-## 3) Redeploy Netlify
+## 3) Verify storage bucket
 
-After SQL is applied:
+```sql
+select id, name, public
+from storage.buckets
+where id = 'aranha-media';
+```
+
+Expected: one row for `aranha-media` with `public = true`.
+
+## 4) Redeploy Netlify and test
+
+- Netlify env vars required at build time:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_PUBLISHABLE_KEY` (or `VITE_SUPABASE_ANON_KEY`)
 - Redeploy your Netlify site.
 - Open site in 2 browsers/devices.
-- Edit content in browser A.
-- Wait 5-10 seconds in browser B (or refresh once).
-
-## 4) Important limitation
-
-Shared sync now covers `localStorage` app data.
-Large files stored as raw browser `IndexedDB` blobs remain device-local unless migrated to Supabase Storage.
+- Edit users/groups/schedules/content/media in browser A.
+- Verify browser B reflects updates (wait ~5-10s or refresh once).

@@ -14,6 +14,7 @@ import {
 import { Trash2, Upload, Plus } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppContent } from "@/hooks/useAppContent";
+import { getSharedJsonValue, setSharedJsonValue, SHARED_ASSET_KEYS } from "@/lib/storage";
 
 import img5 from "@/assets/IMG-20260126-WA0046.jpg";
 import img6 from "@/assets/IMG-20260126-WA0048.jpg";
@@ -35,15 +36,15 @@ const GallerySection = () => {
   const sectionRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem("home_gallery_images");
-    if (saved) {
-      try {
-        setGalleryImages(JSON.parse(saved));
-      } catch (error) {
-        console.error("Failed to load gallery images", error);
-        setGalleryImages(defaultGalleryImages);
-      }
-    }
+    setGalleryImages(getSharedJsonValue<string[]>(SHARED_ASSET_KEYS.HOME_GALLERY_IMAGES, defaultGalleryImages));
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key !== SHARED_ASSET_KEYS.HOME_GALLERY_IMAGES) return;
+      setGalleryImages(getSharedJsonValue<string[]>(SHARED_ASSET_KEYS.HOME_GALLERY_IMAGES, defaultGalleryImages));
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   useEffect(() => {
@@ -77,20 +78,20 @@ const GallerySection = () => {
     const updated = [...galleryImages];
     updated[index] = base64;
     setGalleryImages(updated);
-    localStorage.setItem("home_gallery_images", JSON.stringify(updated));
+    setSharedJsonValue<string[]>(SHARED_ASSET_KEYS.HOME_GALLERY_IMAGES, updated);
   };
 
   const handleDeleteGalleryImage = (index: number) => {
     const updated = galleryImages.filter((_, imageIndex) => imageIndex !== index);
     setGalleryImages(updated);
-    localStorage.setItem("home_gallery_images", JSON.stringify(updated));
+    setSharedJsonValue<string[]>(SHARED_ASSET_KEYS.HOME_GALLERY_IMAGES, updated);
   };
 
   const handleAddGalleryImage = async (file: File) => {
     const base64 = await handleImageUpload(file);
     const updated = [...galleryImages, base64];
     setGalleryImages(updated);
-    localStorage.setItem("home_gallery_images", JSON.stringify(updated));
+    setSharedJsonValue<string[]>(SHARED_ASSET_KEYS.HOME_GALLERY_IMAGES, updated);
   };
 
   return (

@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Upload } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppContent } from "@/hooks/useAppContent";
+import { getSharedValue, setSharedValue, SHARED_ASSET_KEYS } from "@/lib/storage";
 import heroImage from "@/assets/hero-academy.jpg";
 
 const HeroSection = () => {
@@ -13,7 +14,7 @@ const HeroSection = () => {
   const content = useAppContent();
 
   useEffect(() => {
-    const saved = localStorage.getItem("home_hero_image");
+    const saved = getSharedValue(SHARED_ASSET_KEYS.HOME_HERO_IMAGE);
     if (saved) {
       try {
         setHeroImageSrc(saved);
@@ -21,6 +22,14 @@ const HeroSection = () => {
         console.error("Failed to load hero image", error);
       }
     }
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key !== SHARED_ASSET_KEYS.HOME_HERO_IMAGE) return;
+      setHeroImageSrc(getSharedValue(SHARED_ASSET_KEYS.HOME_HERO_IMAGE) || heroImage);
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   const handleImageUpload = async (file: File) => {
@@ -29,7 +38,7 @@ const HeroSection = () => {
       reader.onload = () => {
         const base64 = reader.result as string;
         setHeroImageSrc(base64);
-        localStorage.setItem("home_hero_image", base64);
+        setSharedValue(SHARED_ASSET_KEYS.HOME_HERO_IMAGE, base64);
         resolve();
       };
       reader.readAsDataURL(file);

@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  __resetStorageForTests,
   APP_CONFIG_UPDATED_EVENT,
   getAppConfig,
+  getSharedValue,
   saveAppConfig,
   saveMedia,
+  setSharedValue,
+  SHARED_ASSET_KEYS,
 } from "@/lib/storage";
 import {
   applyBrandingToDocument,
@@ -16,7 +20,7 @@ import {
 
 describe("Branding utilities", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
     document.title = "Test";
     document.head.querySelectorAll("link[rel~='icon']").forEach((node) => node.remove());
   });
@@ -59,19 +63,19 @@ describe("Branding utilities", () => {
   });
 
   it("falls back to legacy logo key if app config has no logo", () => {
-    localStorage.setItem("app_logo", "data:image/png;base64,legacy-logo");
+    setSharedValue(SHARED_ASSET_KEYS.LEGACY_LOGO, "data:image/png;base64,legacy-logo");
     expect(getResolvedLogoUrl()).toBe("data:image/png;base64,legacy-logo");
   });
 
   it("sets and clears a custom logo", () => {
     setCustomLogoDataUrl("data:image/png;base64,new-logo");
     expect(getAppConfig()?.logoDataUrl).toBe("data:image/png;base64,new-logo");
-    expect(localStorage.getItem("app_logo")).toBe("data:image/png;base64,new-logo");
+    expect(getSharedValue(SHARED_ASSET_KEYS.LEGACY_LOGO)).toBe("data:image/png;base64,new-logo");
 
     clearCustomLogo();
     expect(getAppConfig()?.logoDataUrl).toBeUndefined();
     expect(getAppConfig()?.logo).toBeUndefined();
-    expect(localStorage.getItem("app_logo")).toBeNull();
+    expect(getSharedValue(SHARED_ASSET_KEYS.LEGACY_LOGO)).toBeNull();
   });
 
   it("resolves favicon, brand name and applies to document", () => {
@@ -97,3 +101,4 @@ describe("Branding utilities", () => {
     expect(document.title).toBe("Aranha Pro");
   });
 });
+

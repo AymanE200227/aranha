@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { APP_CONTENT_UPDATED_EVENT, getAppContent } from "@/lib/storage";
+import { __resetStorageForTests, APP_CONTENT_UPDATED_EVENT, getAppContent } from "@/lib/storage";
 import {
   DEFAULT_APP_CONTENT,
   getContentValue,
@@ -10,7 +10,7 @@ import {
 
 describe("Content override utilities", () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetStorageForTests();
   });
 
   it("returns defaults when there are no overrides", () => {
@@ -68,3 +68,4 @@ describe("Content override utilities", () => {
     expect(getResolvedAppContent()["navbar.link.home"]).toBe(DEFAULT_APP_CONTENT["navbar.link.home"]);
   });
 });
+

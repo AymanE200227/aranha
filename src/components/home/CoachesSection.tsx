@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { Upload } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppContent } from "@/hooks/useAppContent";
+import { getSharedJsonValue, getSharedValue, setSharedJsonValue, setSharedValue, SHARED_ASSET_KEYS } from "@/lib/storage";
 import lineageBanner from "@/assets/lineage-banner.jpg";
 import coach1Image from "@/assets/coach-1.jpg";
 import coach2Image from "@/assets/coach-2.jpg";
@@ -14,23 +15,25 @@ const CoachesSection = () => {
   const [coachImages, setCoachImages] = useState<string[]>([coach1Image, coach2Image]);
 
   useEffect(() => {
-    const saved = localStorage.getItem("home_coaches_images");
-    if (saved) {
-      try {
-        setCoachImages(JSON.parse(saved));
-      } catch (error) {
-        console.error("Failed to load coach images", error);
-      }
-    }
+    setCoachImages(
+      getSharedJsonValue<string[]>(SHARED_ASSET_KEYS.HOME_COACHES_IMAGES, [coach1Image, coach2Image])
+    );
+    setLineageImage(getSharedValue(SHARED_ASSET_KEYS.HOME_LINEAGE_IMAGE) || lineageBanner);
 
-    const savedLineage = localStorage.getItem("home_lineage_image");
-    if (savedLineage) {
-      try {
-        setLineageImage(savedLineage);
-      } catch {
-        // Keep default.
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === SHARED_ASSET_KEYS.HOME_COACHES_IMAGES) {
+        setCoachImages(
+          getSharedJsonValue<string[]>(SHARED_ASSET_KEYS.HOME_COACHES_IMAGES, [coach1Image, coach2Image])
+        );
       }
-    }
+
+      if (event.key === SHARED_ASSET_KEYS.HOME_LINEAGE_IMAGE) {
+        setLineageImage(getSharedValue(SHARED_ASSET_KEYS.HOME_LINEAGE_IMAGE) || lineageBanner);
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   const lineage = useMemo(
@@ -85,7 +88,7 @@ const CoachesSection = () => {
   const handleReplaceLineageImage = async (file: File) => {
     const base64 = await handleImageUpload(file);
     setLineageImage(base64);
-    localStorage.setItem("home_lineage_image", base64);
+    setSharedValue(SHARED_ASSET_KEYS.HOME_LINEAGE_IMAGE, base64);
   };
 
   const handleReplaceCoachImage = async (index: number, file: File) => {
@@ -93,7 +96,7 @@ const CoachesSection = () => {
     const updated = [...coachImages];
     updated[index] = base64;
     setCoachImages(updated);
-    localStorage.setItem("home_coaches_images", JSON.stringify(updated));
+    setSharedJsonValue<string[]>(SHARED_ASSET_KEYS.HOME_COACHES_IMAGES, updated);
   };
 
   return (
