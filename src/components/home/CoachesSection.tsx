@@ -8,8 +8,8 @@ import coach1Image from "@/assets/coach-1.jpg";
 import coach2Image from "@/assets/coach-2.jpg";
 
 const CoachesSection = () => {
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const { hasPrivilege } = useAuth();
+  const canManageMedia = hasPrivilege("manage_media");
   const content = useAppContent();
   const [lineageImage, setLineageImage] = useState<string>(lineageBanner);
   const [coachImages, setCoachImages] = useState<string[]>([coach1Image, coach2Image]);
@@ -121,7 +121,7 @@ const CoachesSection = () => {
           <div className="rounded-2xl overflow-hidden shadow-2xl border border-primary/20 relative group">
             <img src={lineageImage} alt="Aranha Association lineage" className="w-full h-auto" />
 
-            {isAdmin && (
+            {canManageMedia && (
               <label className="absolute top-3 right-3 p-2 rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground transition-colors cursor-pointer opacity-0 group-hover:opacity-100 z-10">
                 <Upload className="w-4 h-4" />
                 <input
@@ -191,7 +191,7 @@ const CoachesSection = () => {
                 <div className="relative">
                   <img src={coachImages[index]} alt={coach.name} className="w-32 h-40 object-cover rounded-lg" />
 
-                  {isAdmin && (
+                  {canManageMedia && (
                     <label className="absolute top-1 right-1 p-2 rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground transition-colors cursor-pointer opacity-0 group-hover:opacity-100 z-10">
                       <Upload className="w-3 h-3" />
                       <input

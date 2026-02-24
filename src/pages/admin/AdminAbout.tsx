@@ -48,7 +48,7 @@ const MAX_ABOUT_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export default function AdminAbout() {
   const navigate = useNavigate();
-  const { logout, isAdmin, isAuthenticated, isLoading } = useAuth();
+  const { logout, canAccessAdmin, hasPrivilege, isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
   const [aboutItems, setAboutItems] = useState<AboutImage[]>([]);
   const [filteredItems, setFilteredItems] = useState<AboutImage[]>([]);
@@ -59,10 +59,16 @@ export default function AdminAbout() {
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || !isAdmin)) {
+    if (isLoading) return;
+    if (!isAuthenticated || !canAccessAdmin) {
       navigate("/auth");
+      return;
     }
-  }, [isLoading, isAuthenticated, isAdmin, navigate]);
+
+    if (!hasPrivilege("manage_about")) {
+      navigate("/admin");
+    }
+  }, [isLoading, isAuthenticated, canAccessAdmin, hasPrivilege, navigate]);
 
   const loadAboutContent = useCallback(() => {
     const stored = getAboutContent();

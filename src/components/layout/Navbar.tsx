@@ -20,7 +20,7 @@ const Navbar = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { isAuthenticated, isAdmin, user, logout } = useAuth();
+  const { isAuthenticated, canAccessAdmin, hasPrivilege, user, logout } = useAuth();
   const content = useAppContent();
 
   const refreshBranding = useCallback(() => {
@@ -94,7 +94,7 @@ const Navbar = () => {
           <Link to="/" className="group relative flex items-center gap-3">
             <div className="relative">
               <BrandLogo logo={logo} brandName={brandName} imageClassName={cn("w-auto transition-all duration-300", isScrolled ? "h-9" : "h-10")} />
-              {isAdmin && (
+              {canManageMedia && (
                 <label className="absolute -right-2 -top-2 z-10 cursor-pointer rounded-lg bg-primary/90 p-1.5 text-primary-foreground opacity-0 transition-colors hover:bg-primary group-hover:opacity-100">
                   <Upload className="h-3 w-3" />
                   <input
@@ -137,7 +137,7 @@ const Navbar = () => {
             <div className="ml-3 flex items-center gap-2">
               {isAuthenticated ? (
                 <div className="flex items-center gap-2">
-                {isAdmin && (
+                {canAccessAdmin && (
                   <Link to="/admin">
                     <Button variant="goldOutline" size="sm">
                       {content["navbar.button.admin"]}
@@ -198,7 +198,7 @@ const Navbar = () => {
 
               {isAuthenticated ? (
                 <>
-                  {isAdmin && (
+                  {canAccessAdmin && (
                     <Link to="/admin" onClick={() => setIsOpen(false)}>
                       <Button variant="goldOutline" className="w-full">
                         {content["navbar.button.admin_mobile"]}
@@ -239,3 +239,4 @@ const Navbar = () => {
 };
 
 export default Navbar;
+  const canManageMedia = hasPrivilege("manage_media");

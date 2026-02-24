@@ -48,8 +48,8 @@ interface GalleryImage {
 }
 
 const About = () => {
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const { hasPrivilege } = useAuth();
+  const isAdmin = hasPrivilege("manage_about");
   const [isVisible, setIsVisible] = useState(false);
   const [scrollY, setScrollY] = useState(0);
   const sectionRef = useRef<HTMLElement>(null);

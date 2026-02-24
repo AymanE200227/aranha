@@ -52,7 +52,7 @@ type PendingRange = {
 
 const AdminSchedules = () => {
   const navigate = useNavigate();
-  const { logout, isAdmin, isAuthenticated, isLoading } = useAuth();
+  const { logout, canAccessAdmin, hasPrivilege, isAuthenticated, isLoading } = useAuth();
 
   const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -64,10 +64,16 @@ const AdminSchedules = () => {
   const timeLabels = useMemo(() => [...SCHEDULE_TIME_SLOTS, SCHEDULE_DAY_END_LABEL], []);
 
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || !isAdmin)) {
+    if (isLoading) return;
+    if (!isAuthenticated || !canAccessAdmin) {
       navigate("/auth");
+      return;
     }
-  }, [isLoading, isAuthenticated, isAdmin, navigate]);
+
+    if (!hasPrivilege("manage_schedules")) {
+      navigate("/admin");
+    }
+  }, [isLoading, isAuthenticated, canAccessAdmin, hasPrivilege, navigate]);
 
   const groupsById = useMemo(() => {
     return new Map(groups.map((group) => [group.id, group]));

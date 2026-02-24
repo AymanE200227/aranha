@@ -28,8 +28,8 @@ import img12 from "@/assets/IMG-20260126-WA0083.jpg";
 const defaultGalleryImages = [img5, img6, img7, img8, img9, img10, img11, img12];
 
 const GallerySection = () => {
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const { hasPrivilege } = useAuth();
+  const canManageMedia = hasPrivilege("manage_media");
   const content = useAppContent();
   const [isVisible, setIsVisible] = useState(false);
   const [galleryImages, setGalleryImages] = useState<string[]>(defaultGalleryImages);
@@ -135,7 +135,7 @@ const GallerySection = () => {
               />
               <div className="absolute inset-0 bg-gradient-to-t from-background/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-              {isAdmin && (
+              {canManageMedia && (
                 <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                   <label className="p-2 rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground transition-colors cursor-pointer">
                     <Upload className="w-4 h-4" />
@@ -180,7 +180,7 @@ const GallerySection = () => {
             </div>
           ))}
 
-          {isAdmin && (
+          {canManageMedia && (
             <label className="relative group overflow-hidden rounded-xl border-2 border-dashed border-primary/50 hover:border-primary/80 bg-primary/5 hover:bg-primary/10 aspect-square flex items-center justify-center cursor-pointer transition-all">
               <div className="flex flex-col items-center gap-2">
                 <Plus className="w-8 h-8 text-primary" />

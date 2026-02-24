@@ -121,7 +121,7 @@ const QUICK_CONTENT_FIELDS: Array<{ key: string; label: string; multiline?: bool
 
 export default function AdminMedia() {
   const navigate = useNavigate();
-  const { logout, isAdmin, isAuthenticated, isLoading } = useAuth();
+  const { logout, canAccessAdmin, hasPrivilege, isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [filteredMedia, setFilteredMedia] = useState<MediaItem[]>([]);
@@ -136,10 +136,16 @@ export default function AdminMedia() {
   const [mediaToDelete, setMediaToDelete] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || !isAdmin)) {
+    if (isLoading) return;
+    if (!isAuthenticated || !canAccessAdmin) {
       navigate("/auth");
+      return;
     }
-  }, [isLoading, isAuthenticated, isAdmin, navigate]);
+
+    if (!hasPrivilege("manage_media")) {
+      navigate("/admin");
+    }
+  }, [isLoading, isAuthenticated, canAccessAdmin, hasPrivilege, navigate]);
 
   const loadMedia = useCallback(() => {
     setMediaItems(getMediaItems());

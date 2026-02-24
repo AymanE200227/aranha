@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,7 +17,7 @@ import { getUserGroupIds } from "@/lib/userGroups";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  const { logout, isAdmin, isAuthenticated, isLoading } = useAuth();
+  const { logout, canAccessAdmin, hasPrivilege, isAuthenticated, isLoading } = useAuth();
   const [stats, setStats] = useState({
     totalUsers: 0,
     activeGroups: 0,
@@ -27,10 +27,11 @@ const AdminDashboard = () => {
   const [recentUsers, setRecentUsers] = useState<{ name: string; group: string; joined: string }[]>([]);
 
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || !isAdmin)) {
+    if (isLoading) return;
+    if (!isAuthenticated || !canAccessAdmin) {
       navigate("/auth");
     }
-  }, [isLoading, isAuthenticated, isAdmin, navigate]);
+  }, [isLoading, isAuthenticated, canAccessAdmin, navigate]);
 
   const loadStats = useCallback(() => {
     const users = getUsers();
@@ -38,7 +39,6 @@ const AdminDashboard = () => {
     const schedules = getSchedules();
     const attendance = getAttendance();
 
-    // Calculate attendance rate
     const presentCount = attendance.filter((a) => a.status === "present").length;
     const totalCount = attendance.length;
     const rate = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
@@ -46,11 +46,10 @@ const AdminDashboard = () => {
     setStats({
       totalUsers: users.filter((u) => u.role === "client").length,
       activeGroups: groups.length,
-      sessionsThisMonth: schedules.length * 4, // Approximate monthly sessions
+      sessionsThisMonth: schedules.length * 4,
       attendanceRate: rate,
     });
 
-    // Get recent users
     const clientUsers = users
       .filter((u) => u.role === "client")
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -86,12 +85,24 @@ const AdminDashboard = () => {
     navigate("/");
   };
 
+  const quickActions = useMemo(
+    () =>
+      [
+        { name: "Creer Utilisateur", icon: Users, path: "/admin/users", privilege: "manage_users" as const },
+        { name: "Creer Groupe", icon: Plus, path: "/admin/groups", privilege: "manage_groups" as const },
+        { name: "Gerer Emplois", icon: Calendar, path: "/admin/schedules", privilege: "manage_schedules" as const },
+        { name: "Marquer Presences", icon: UserCheck, path: "/admin/attendance", privilege: "manage_attendance" as const },
+        { name: "Gerer Medias", icon: ImageIcon, path: "/admin/media", privilege: "manage_media" as const },
+        { name: "Gerer A Propos", icon: FileText, path: "/admin/about", privilege: "manage_about" as const },
+      ].filter((action) => hasPrivilege(action.privilege)),
+    [hasPrivilege]
+  );
+
   if (isLoading) return null;
 
   return (
     <AdminShell onLogout={handleLogout}>
       <div className="mx-auto max-w-[1400px]">
-        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="font-display text-3xl text-foreground">
@@ -101,15 +112,16 @@ const AdminDashboard = () => {
               Bienvenue dans votre espace administration
             </p>
           </div>
-          <Link to="/admin/users">
-            <Button variant="gold">
-              <Plus className="w-4 h-4 mr-2" />
-              Nouvel Utilisateur
-            </Button>
-          </Link>
+          {hasPrivilege("manage_users") && (
+            <Link to="/admin/users">
+              <Button variant="gold">
+                <Plus className="w-4 h-4 mr-2" />
+                Nouvel Utilisateur
+              </Button>
+            </Link>
+          )}
         </div>
 
-        {/* Stats Grid */}
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="stat-card">
             <div className="text-muted-foreground text-sm mb-1">Total Utilisateurs</div>
@@ -133,22 +145,13 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* Quick Actions & Recent Users */}
         <div className="grid lg:grid-cols-2 gap-6">
-          {/* Quick Actions */}
           <div className="card-elevated p-6">
             <h3 className="font-display text-xl text-foreground mb-4">
               Actions Rapides
             </h3>
             <div className="grid grid-cols-2 gap-4">
-              {[
-                { name: "Creer Utilisateur", icon: Users, path: "/admin/users" },
-                { name: "Creer Groupe", icon: Plus, path: "/admin/groups" },
-                { name: "Gerer Emplois", icon: Calendar, path: "/admin/schedules" },
-                { name: "Marquer Presences", icon: UserCheck, path: "/admin/attendance" },
-                { name: "Gerer Medias", icon: ImageIcon, path: "/admin/media" },
-                { name: "Gerer A Propos", icon: FileText, path: "/admin/about" },
-              ].map((action, index) => (
+              {quickActions.map((action, index) => (
                 <Link
                   key={index}
                   to={action.path}
@@ -165,18 +168,19 @@ const AdminDashboard = () => {
             </div>
           </div>
 
-          {/* Recent Users */}
           <div className="card-elevated p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display text-xl text-foreground">
                 Nouveaux Membres
               </h3>
-              <Link
-                to="/admin/users"
-                className="text-primary text-sm hover:underline flex items-center gap-1"
-              >
-                Voir tous <ChevronRight className="w-4 h-4" />
-              </Link>
+              {hasPrivilege("manage_users") && (
+                <Link
+                  to="/admin/users"
+                  className="text-primary text-sm hover:underline flex items-center gap-1"
+                >
+                  Voir tous <ChevronRight className="w-4 h-4" />
+                </Link>
+              )}
             </div>
             <div className="space-y-4">
               {recentUsers.length === 0 ? (
@@ -213,4 +217,3 @@ const AdminDashboard = () => {
 };
 
 export default AdminDashboard;
-

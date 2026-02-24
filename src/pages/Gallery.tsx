@@ -14,7 +14,8 @@ import { Plus, Trash2, Edit, Image as ImageIcon, Video, X, ChevronLeft, Play, Up
 import { toast } from "sonner";
 
 const Gallery = () => {
-  const { isAuthenticated, isLoading, isAdmin } = useAuth();
+  const { isAuthenticated, isLoading, isAdmin: isPlatformAdmin, hasPrivilege } = useAuth();
+  const isAdmin = isPlatformAdmin || hasPrivilege("manage_media");
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [albums, setAlbums] = useState<Album[]>([]);

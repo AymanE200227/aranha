@@ -2,10 +2,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { User, Group, ScheduleSlot, AttendanceRecord, Album, MediaFile } from "./types";
 import { SCHEDULE_DAY_END_LABEL, SCHEDULE_SLOT_INTERVAL_MINUTES, SCHEDULE_START_HOUR, parseTimeToMinutes } from "@/lib/schedule";
 import { withNormalizedUserGroups } from "@/lib/userGroups";
+import { ALL_ADMIN_PRIVILEGES, normalizeAdminPrivileges } from "@/lib/adminPermissions";
 
 const REMOTE_TABLE = "app_shared_storage";
 const REMOTE_POLL_INTERVAL_MS = 5000;
 const REMOTE_FLUSH_DEBOUNCE_MS = 250;
+const PRIMARY_ADMIN_ID = "admin-001";
+const PRIMARY_ADMIN_EMAIL = "admin@aranha.ma";
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -68,6 +71,30 @@ interface SharedStorageRow {
 }
 
 const isBrowser = (): boolean => typeof window !== "undefined";
+
+const isPrimaryAdminUser = (user: Partial<Pick<User, "id" | "email" | "role">>): boolean => {
+  const normalizedEmail = user.email?.toLowerCase();
+  return user.role === "admin" && (user.id === PRIMARY_ADMIN_ID || normalizedEmail === PRIMARY_ADMIN_EMAIL);
+};
+
+const withNormalizedAdminAccess = <
+  T extends Pick<User, "role" | "privileges"> & Partial<Pick<User, "id" | "email">>
+>(
+  user: T
+): T => {
+  const shouldDowngradeAdmin = user.role === "admin" && !isPrimaryAdminUser(user);
+  const normalizedRole = shouldDowngradeAdmin ? "co_admin" : user.role;
+  const fallbackPrivileges =
+    shouldDowngradeAdmin && (!user.privileges || user.privileges.length === 0)
+      ? ALL_ADMIN_PRIVILEGES
+      : user.privileges || [];
+
+  return {
+    ...user,
+    role: normalizedRole,
+    privileges: normalizeAdminPrivileges(normalizedRole, fallbackPrivileges),
+  };
+};
 
 const isRemoteConfigured = (): boolean => {
   if (!isBrowser()) return false;
@@ -347,11 +374,12 @@ export const generateId = (): string => {
 
 // Default admin credentials
 const DEFAULT_ADMIN: User = {
-  id: "admin-001",
-  email: "admin@aranha.ma",
+  id: PRIMARY_ADMIN_ID,
+  email: PRIMARY_ADMIN_EMAIL,
   name: "Administrateur",
   password: "Admin@2024",
   role: "admin",
+  privileges: ALL_ADMIN_PRIVILEGES,
   groupId: null,
   groupIds: [],
   createdAt: new Date().toISOString(),
@@ -479,10 +507,13 @@ export const getUsers = (): User[] => {
   let hasNormalizedChanges = false;
 
   const normalizedUsers = users.map((user) => {
-    const normalized = withNormalizedUserGroups(user);
+    const normalized = withNormalizedAdminAccess(withNormalizedUserGroups(user));
     const previousIds = (user.groupIds || []).join("|");
     const nextIds = normalized.groupIds?.join("|") || "";
-    if (user.groupId !== normalized.groupId || previousIds !== nextIds) {
+    const previousPrivileges = (user.privileges || []).join("|");
+    const nextPrivileges = (normalized.privileges || []).join("|");
+
+    if (user.groupId !== normalized.groupId || previousIds !== nextIds || previousPrivileges !== nextPrivileges) {
       hasNormalizedChanges = true;
     }
     return normalized;
@@ -505,10 +536,10 @@ export const getUserByEmail = (email: string): User | undefined => {
 
 export const createUser = (user: Omit<User, "id" | "createdAt">): User => {
   const users = getUsers();
-  const normalizedInput = withNormalizedUserGroups({
+  const normalizedInput = withNormalizedAdminAccess(withNormalizedUserGroups({
     ...user,
     groupId: user.groupId ?? null,
-  });
+  }));
   const newUser: User = {
     ...normalizedInput,
     id: generateId(),
@@ -524,10 +555,10 @@ export const updateUser = (id: string, data: Partial<User>): User | null => {
   const index = users.findIndex((u) => u.id === id);
   if (index === -1) return null;
 
-  const nextUser = withNormalizedUserGroups({
+  const nextUser = withNormalizedAdminAccess(withNormalizedUserGroups({
     ...users[index],
     ...data,
-  });
+  }));
   users[index] = nextUser;
   writeStorage(STORAGE_KEYS.USERS, users);
 
@@ -683,9 +714,10 @@ export const markAttendance = (
 export const getSession = (): { user: User; isAuthenticated: boolean } | null => {
   const session = readStorage<{ user: User; isAuthenticated: boolean } | null>(STORAGE_KEYS.SESSION, null);
   if (!session) return null;
+  const normalizedUser = withNormalizedAdminAccess(withNormalizedUserGroups(session.user));
   return {
     ...session,
-    user: withNormalizedUserGroups(session.user),
+    user: normalizedUser,
   };
 };
 

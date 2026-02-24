@@ -8,8 +8,8 @@ import { getSharedValue, setSharedValue, SHARED_ASSET_KEYS } from "@/lib/storage
 import heroImage from "@/assets/hero-academy.jpg";
 
 const HeroSection = () => {
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const { hasPrivilege } = useAuth();
+  const canManageMedia = hasPrivilege("manage_media");
   const [heroImageSrc, setHeroImageSrc] = useState<string>(heroImage);
   const content = useAppContent();
 
@@ -58,7 +58,7 @@ const HeroSection = () => {
         <div className="absolute inset-0 bg-gradient-to-b from-background/84 via-background/66 to-background" />
         <div className="absolute inset-x-0 top-0 h-80 bg-gradient-to-b from-background/70 to-transparent" />
 
-        {isAdmin && (
+        {canManageMedia && (
           <label className="absolute top-6 left-6 p-3 rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground transition-colors cursor-pointer z-20">
             <Upload className="w-5 h-5" />
             <input

@@ -1,3 +1,13 @@
+export type UserRole = "admin" | "co_admin" | "client";
+
+export type AdminPrivilege =
+  | "manage_users"
+  | "manage_groups"
+  | "manage_schedules"
+  | "manage_attendance"
+  | "manage_media"
+  | "manage_about";
+
 // User types
 export interface User {
   id: string;
@@ -6,7 +16,8 @@ export interface User {
   firstName?: string;
   lastName?: string;
   password: string;
-  role: "admin" | "client";
+  role: UserRole;
+  privileges?: AdminPrivilege[];
   groupId: string | null;
   groupIds?: string[];
   createdAt: string;

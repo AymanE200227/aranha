@@ -25,38 +25,58 @@ import {
   Edit,
   Search,
   ShieldCheck,
+  Shield,
   Users as UsersIcon,
   UserCheck,
   Layers3,
 } from "lucide-react";
 import { toast } from "sonner";
-import { User, Group } from "@/lib/types";
+import { AdminPrivilege, Group, User, UserRole } from "@/lib/types";
 import { getUsers, createUser, updateUser, deleteUser, getGroups } from "@/lib/storage";
 import { useAuth } from "@/hooks/useAuth";
 import AdminShell from "@/components/admin/AdminShell";
+import { ALL_ADMIN_PRIVILEGES, ADMIN_PRIVILEGE_DEFINITIONS } from "@/lib/adminPermissions";
+
+const PRIMARY_ADMIN_ID = "admin-001";
+const PRIMARY_ADMIN_EMAIL = "admin@aranha.ma";
+
+const isPrimaryAdmin = (user?: Pick<User, "id" | "email" | "role"> | null): boolean => {
+  if (!user) return false;
+  return (
+    user.role === "admin" &&
+    (user.id === PRIMARY_ADMIN_ID || user.email.toLowerCase() === PRIMARY_ADMIN_EMAIL)
+  );
+};
 
 const AdminUsers = () => {
   const navigate = useNavigate();
-  const { logout, isAdmin, isAuthenticated, isLoading } = useAuth();
+  const { logout, canAccessAdmin, hasPrivilege, isAuthenticated, isLoading } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "client">("all");
+  const [roleFilter, setRoleFilter] = useState<"all" | UserRole>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
-    role: "client" as "admin" | "client",
+    role: "client" as UserRole,
     groupIds: [] as string[],
+    privileges: [] as AdminPrivilege[],
   });
 
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || !isAdmin)) {
+    if (isLoading) return;
+    if (!isAuthenticated || !canAccessAdmin) {
       navigate("/auth");
+      return;
     }
-  }, [isLoading, isAuthenticated, isAdmin, navigate]);
+
+    if (!hasPrivilege("manage_users")) {
+      navigate("/admin");
+    }
+  }, [isLoading, isAuthenticated, canAccessAdmin, hasPrivilege, navigate]);
 
   useEffect(() => {
     loadData();
@@ -69,11 +89,27 @@ const AdminUsers = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const editingPrimaryAdmin = isPrimaryAdmin(editingUser);
+    const normalizedRole: UserRole = editingPrimaryAdmin
+      ? "admin"
+      : formData.role === "admin"
+      ? "co_admin"
+      : formData.role;
+    const normalizedPrivileges =
+      normalizedRole === "co_admin"
+        ? Array.from(new Set(formData.privileges))
+        : [];
+
+    if (normalizedRole === "co_admin" && normalizedPrivileges.length === 0) {
+      toast.error("Selectionnez au moins un privilege pour le co-admin");
+      return;
+    }
 
     const payload = {
       name: formData.name,
       email: formData.email,
-      role: formData.role,
+      role: normalizedRole,
+      privileges: normalizedPrivileges,
       groupIds: formData.groupIds,
       groupId: formData.groupIds[0] || null,
     };
@@ -102,13 +138,25 @@ const AdminUsers = () => {
   };
 
   const handleEdit = (user: User) => {
+    const normalizedRole: UserRole =
+      user.role === "admin" && !isPrimaryAdmin(user) ? "co_admin" : user.role;
+    const normalizedPrivileges =
+      normalizedRole === "co_admin"
+        ? user.privileges && user.privileges.length > 0
+          ? user.privileges
+          : user.role === "admin"
+          ? ALL_ADMIN_PRIVILEGES
+          : []
+        : [];
+
     setEditingUser(user);
     setFormData({
       name: user.name,
       email: user.email,
       password: "",
-      role: user.role,
+      role: normalizedRole,
       groupIds: Array.from(new Set([...(user.groupIds || []), user.groupId].filter(Boolean))) as string[],
+      privileges: normalizedPrivileges,
     });
     setIsDialogOpen(true);
   };
@@ -122,7 +170,7 @@ const AdminUsers = () => {
   };
 
   const resetForm = () => {
-    setFormData({ name: "", email: "", password: "", role: "client", groupIds: [] });
+    setFormData({ name: "", email: "", password: "", role: "client", groupIds: [], privileges: [] });
     setEditingUser(null);
     setIsDialogOpen(false);
   };
@@ -134,17 +182,14 @@ const AdminUsers = () => {
 
   const stats = useMemo(() => {
     const adminCount = users.filter((user) => user.role === "admin").length;
+    const coAdminCount = users.filter((user) => user.role === "co_admin").length;
     const clientCount = users.filter((user) => user.role === "client").length;
-    const multiGroupCount = users.filter((user) => {
-      const ids = Array.from(new Set([...(user.groupIds || []), user.groupId].filter(Boolean)));
-      return ids.length > 1;
-    }).length;
 
     return {
       total: users.length,
       admins: adminCount,
+      coAdmins: coAdminCount,
       clients: clientCount,
-      multiGroups: multiGroupCount,
     };
   }, [users]);
 
@@ -174,7 +219,26 @@ const AdminUsers = () => {
     }));
   };
 
+  const handleRoleChange = (nextRole: UserRole) => {
+    setFormData((previous) => ({
+      ...previous,
+      role: nextRole,
+      privileges:
+        nextRole === "co_admin" ? previous.privileges : [],
+    }));
+  };
+
+  const togglePrivilegeSelection = (privilege: AdminPrivilege, checked: boolean) => {
+    setFormData((previous) => ({
+      ...previous,
+      privileges: checked
+        ? Array.from(new Set([...previous.privileges, privilege]))
+        : previous.privileges.filter((current) => current !== privilege),
+    }));
+  };
+
   if (isLoading) return null;
+  const editingPrimaryAdmin = isPrimaryAdmin(editingUser);
 
   return (
     <AdminShell onLogout={handleLogout}>
@@ -201,12 +265,12 @@ const AdminUsers = () => {
                 <p className="font-display text-lg text-foreground">{stats.admins}</p>
               </div>
               <div className="rounded-xl border border-border/50 bg-background/35 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Clients</p>
-                <p className="font-display text-lg text-foreground">{stats.clients}</p>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Co-admins</p>
+                <p className="font-display text-lg text-foreground">{stats.coAdmins}</p>
               </div>
               <div className="rounded-xl border border-border/50 bg-background/35 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Multi-groupes</p>
-                <p className="font-display text-lg text-foreground">{stats.multiGroups}</p>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Clients</p>
+                <p className="font-display text-lg text-foreground">{stats.clients}</p>
               </div>
             </div>
           </div>
@@ -271,17 +335,83 @@ const AdminUsers = () => {
                     <Label>Role</Label>
                     <Select
                       value={formData.role}
-                      onValueChange={(v) => setFormData({ ...formData, role: v as "admin" | "client" })}
+                      onValueChange={(v) => handleRoleChange(v as UserRole)}
+                      disabled={editingPrimaryAdmin}
                     >
                       <SelectTrigger className="mt-1 bg-secondary transition-colors">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="client">Client</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="co_admin">Co-admin</SelectItem>
+                        {editingPrimaryAdmin && <SelectItem value="admin">Admin principal</SelectItem>}
                       </SelectContent>
                     </Select>
+                    {editingPrimaryAdmin && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Le role Admin principal est reserve au compte systeme.
+                      </p>
+                    )}
                   </div>
+
+                  {formData.role === "co_admin" && (
+                    <div className="sm:col-span-2">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <Label>Privileges Co-admin</Label>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() =>
+                              setFormData((previous) => ({
+                                ...previous,
+                                privileges: ALL_ADMIN_PRIVILEGES,
+                              }))
+                            }
+                          >
+                            Tout cocher
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() =>
+                              setFormData((previous) => ({
+                                ...previous,
+                                privileges: [],
+                              }))
+                            }
+                          >
+                            Tout retirer
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-md border border-border/60 bg-secondary/80 p-3 space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          {formData.privileges.length} privilege(s) selectionne(s)
+                        </p>
+                        {ADMIN_PRIVILEGE_DEFINITIONS.map((privilege) => (
+                          <label
+                            key={privilege.key}
+                            className="flex items-start gap-2 rounded-md px-2 py-2 transition-colors hover:bg-background/60"
+                          >
+                            <Checkbox
+                              checked={formData.privileges.includes(privilege.key)}
+                              onCheckedChange={(checked) => togglePrivilegeSelection(privilege.key, Boolean(checked))}
+                            />
+                            <span>
+                              <span className="block text-sm text-foreground">{privilege.label}</span>
+                              <span className="block text-xs text-muted-foreground">{privilege.description}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="sm:col-span-2">
                     <Label>Groupes</Label>
@@ -345,7 +475,16 @@ const AdminUsers = () => {
               onClick={() => setRoleFilter("admin")}
             >
               <ShieldCheck className="w-4 h-4 mr-1.5" />
-              Admins
+              Admin
+            </Button>
+            <Button
+              size="sm"
+              variant={roleFilter === "co_admin" ? "default" : "ghost"}
+              className={roleFilter === "co_admin" ? "bg-primary text-primary-foreground" : ""}
+              onClick={() => setRoleFilter("co_admin")}
+            >
+              <Shield className="w-4 h-4 mr-1.5" />
+              Co-admins
             </Button>
             <Button
               size="sm"
@@ -409,12 +548,29 @@ const AdminUsers = () => {
                             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
                               user.role === "admin"
                                 ? "bg-primary/20 text-primary border-primary/35"
+                                : user.role === "co_admin"
+                                ? "bg-sky-500/15 text-sky-200 border-sky-500/35"
                                 : "bg-accent/20 text-accent border-accent/35"
                             }`}
                           >
-                            {user.role === "admin" ? <ShieldCheck className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
-                            {user.role === "admin" ? "Admin" : "Client"}
+                            {user.role === "admin" ? (
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                            ) : user.role === "co_admin" ? (
+                              <Shield className="w-3.5 h-3.5" />
+                            ) : (
+                              <UserCheck className="w-3.5 h-3.5" />
+                            )}
+                            {user.role === "admin"
+                              ? "Admin principal"
+                              : user.role === "co_admin"
+                              ? "Co-admin"
+                              : "Client"}
                           </span>
+                          {user.role === "co_admin" && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {(user.privileges || []).length} privilege(s)
+                            </p>
+                          )}
                         </td>
                         <td className="p-4 text-muted-foreground">
                           {userGroups.length === 0 ? (
@@ -448,7 +604,7 @@ const AdminUsers = () => {
                               variant="ghost"
                               className="text-destructive hover:bg-destructive/15 hover:text-destructive"
                               onClick={() => handleDelete(user.id)}
-                              disabled={user.email === "admin@aranha.ma"}
+                              disabled={isPrimaryAdmin(user)}
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>

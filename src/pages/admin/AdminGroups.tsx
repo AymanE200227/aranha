@@ -35,7 +35,7 @@ import { isUserInGroup } from "@/lib/userGroups";
 
 const AdminGroups = () => {
   const navigate = useNavigate();
-  const { logout, isAdmin, isAuthenticated, isLoading } = useAuth();
+  const { logout, canAccessAdmin, hasPrivilege, isAuthenticated, isLoading } = useAuth();
   const [groups, setGroups] = useState<Group[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -47,10 +47,16 @@ const AdminGroups = () => {
   });
 
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || !isAdmin)) {
+    if (isLoading) return;
+    if (!isAuthenticated || !canAccessAdmin) {
       navigate("/auth");
+      return;
     }
-  }, [isLoading, isAuthenticated, isAdmin, navigate]);
+
+    if (!hasPrivilege("manage_groups")) {
+      navigate("/admin");
+    }
+  }, [isLoading, isAuthenticated, canAccessAdmin, hasPrivilege, navigate]);
 
   useEffect(() => {
     loadData();

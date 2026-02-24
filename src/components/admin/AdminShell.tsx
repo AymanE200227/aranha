@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, LogOut, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
 import AdminSidebarBrand from "@/components/admin/AdminSidebarBrand";
 import { ADMIN_NAV_LINKS } from "@/lib/adminNav";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 
 type AdminShellProps = {
   children: ReactNode;
@@ -23,6 +24,13 @@ type AdminShellProps = {
 export default function AdminShell({ children, onLogout, mainClassName }: AdminShellProps) {
   const location = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const { hasPrivilege } = useAuth();
+
+  const allowedNavLinks = useMemo(() => {
+    return ADMIN_NAV_LINKS.filter(
+      (link) => !link.requiredPrivilege || hasPrivilege(link.requiredPrivilege)
+    );
+  }, [hasPrivilege]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -31,7 +39,7 @@ export default function AdminShell({ children, onLogout, mainClassName }: AdminS
           <AdminSidebarBrand to="/admin" label="ADMIN" className="mb-0 shrink-0" labelClassName="text-foreground" />
 
           <nav className="hidden flex-1 items-center gap-1 overflow-x-auto lg:flex">
-            {ADMIN_NAV_LINKS.map((link) => {
+            {allowedNavLinks.map((link) => {
               const isActive = location.pathname === link.path;
               return (
                 <Link
@@ -78,7 +86,7 @@ export default function AdminShell({ children, onLogout, mainClassName }: AdminS
                 </SheetHeader>
                 <div className="px-4 pb-6">
                   <nav className="space-y-2">
-                    {ADMIN_NAV_LINKS.map((link) => {
+                    {allowedNavLinks.map((link) => {
                       const isActive = location.pathname === link.path;
                       return (
                         <Link

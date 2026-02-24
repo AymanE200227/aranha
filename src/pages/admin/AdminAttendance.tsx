@@ -40,7 +40,7 @@ const timeSlots = SCHEDULE_TIME_SLOTS;
 
 const AdminAttendance = () => {
   const navigate = useNavigate();
-  const { logout, isAdmin, isAuthenticated, isLoading, user: currentUser } = useAuth();
+  const { logout, canAccessAdmin, hasPrivilege, isAuthenticated, isLoading, user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
@@ -56,10 +56,16 @@ const AdminAttendance = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || !isAdmin)) {
+    if (isLoading) return;
+    if (!isAuthenticated || !canAccessAdmin) {
       navigate("/auth");
+      return;
     }
-  }, [isLoading, isAuthenticated, isAdmin, navigate]);
+
+    if (!hasPrivilege("manage_attendance")) {
+      navigate("/admin");
+    }
+  }, [isLoading, isAuthenticated, canAccessAdmin, hasPrivilege, navigate]);
 
   useEffect(() => {
     loadData();

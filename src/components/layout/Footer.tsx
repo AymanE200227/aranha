@@ -11,7 +11,7 @@ import {
 } from "@/lib/branding";
 
 const Footer = () => {
-  const { isAuthenticated, isAdmin } = useAuth();
+  const { isAuthenticated, canAccessAdmin } = useAuth();
   const [logo, setLogo] = useState<string | null>(null);
   const [brandName, setBrandName] = useState(getResolvedBrandName());
   const content = useAppContent();
@@ -31,10 +31,10 @@ const Footer = () => {
       { name: content["navbar.link.home"] || "Accueil", path: "/" },
       { name: content["navbar.link.schedule"] || "Schedule", path: "/schedule" },
       { name: content["navbar.link.stats"] || "Statistiques", path: "/stats" },
-      ...(isAuthenticated && isAdmin ? [{ name: content["navbar.button.admin_mobile"] || "Admin", path: "/admin" }] : []),
+      ...(isAuthenticated && canAccessAdmin ? [{ name: content["navbar.button.admin_mobile"] || "Admin", path: "/admin" }] : []),
       ...(!isAuthenticated ? [{ name: content["navbar.button.login"] || "Connexion", path: "/auth" }] : []),
     ],
-    [content, isAdmin, isAuthenticated]
+    [content, canAccessAdmin, isAuthenticated]
   );
 
   const platformHighlights = [

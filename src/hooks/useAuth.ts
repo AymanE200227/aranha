@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { User } from "@/lib/types";
+import { AdminPrivilege, User } from "@/lib/types";
 import {
   bootstrapStorage,
   getSession,
@@ -7,6 +7,7 @@ import {
   logout as doLogout,
   register as doRegister,
 } from "@/lib/storage";
+import { userCanAccessAdminPanel, userHasAdminPrivilege } from "@/lib/adminPermissions";
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -79,12 +80,21 @@ export function useAuth() {
   }, []);
 
   const isAdmin = user?.role === "admin";
+  const isCoAdmin = user?.role === "co_admin";
+  const canAccessAdmin = userCanAccessAdminPanel(user);
+  const hasPrivilege = useCallback(
+    (privilege: AdminPrivilege) => userHasAdminPrivilege(user, privilege),
+    [user]
+  );
 
   return {
     user,
     isAuthenticated,
     isLoading,
     isAdmin,
+    isCoAdmin,
+    canAccessAdmin,
+    hasPrivilege,
     login,
     logout,
     register,

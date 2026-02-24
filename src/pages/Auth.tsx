@@ -12,7 +12,7 @@ import { getResolvedBrandName, getResolvedLogoUrl, subscribeBrandingUpdates } fr
 
 const Auth = () => {
   const navigate = useNavigate();
-  const { login, register, isAuthenticated, isAdmin, isLoading } = useAuth();
+  const { login, register, isAuthenticated, canAccessAdmin, isLoading } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
@@ -34,13 +34,13 @@ const Auth = () => {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      if (isAdmin) {
+      if (canAccessAdmin) {
         navigate("/admin");
       } else {
         navigate("/stats");
       }
     }
-  }, [isLoading, isAuthenticated, isAdmin, navigate]);
+  }, [isLoading, isAuthenticated, canAccessAdmin, navigate]);
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
